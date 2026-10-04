@@ -13,6 +13,12 @@ export type Room = {
   kind: "classroom" | "lab";
 };
 
+export type CourseSession = {
+  meeting_number: number;
+  week_pattern: "every" | "odd" | "even";
+  fixed_slot_id: string | null;
+};
+
 export type Offering = {
   id: string;
   course_id: string;
@@ -23,6 +29,7 @@ export type Offering = {
   group_number: number;
   weekly_sessions: number;
   week_pattern: "every" | "odd" | "even";
+  sessions: CourseSession[];
   capacity: number;
   available_slot_ids: string[];
   flexibility: number;

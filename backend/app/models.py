@@ -20,6 +20,12 @@ class RoomInput(BaseModel):
     kind: Literal["classroom", "lab"] = "classroom"
 
 
+class SessionInput(BaseModel):
+    meeting_number: int = Field(ge=1, le=6)
+    week_pattern: Literal["every", "odd", "even"] = "every"
+    fixed_slot_id: str | None = None
+
+
 class OfferingInput(BaseModel):
     id: str
     course_id: str = ""
@@ -30,15 +36,30 @@ class OfferingInput(BaseModel):
     group_number: int = Field(default=1, ge=1, le=99)
     weekly_sessions: int = Field(default=1, ge=1, le=6)
     week_pattern: Literal["every", "odd", "even"] = "every"
+    sessions: list[SessionInput] = Field(default_factory=list, max_length=6)
     capacity: int = Field(default=35, ge=5, le=300)
     available_slot_ids: list[str] = Field(min_length=1)
     flexibility: int = Field(default=3, ge=1, le=5)
     kind: Literal["theory", "lab", "skill"] = "theory"
 
     @model_validator(mode="after")
-    def fill_course_id(self) -> "OfferingInput":
+    def normalize_course_and_sessions(self) -> "OfferingInput":
         if not self.course_id:
             self.course_id = self.id
+        if not self.sessions:
+            self.sessions = [
+                SessionInput(
+                    meeting_number=number,
+                    week_pattern=self.week_pattern,
+                )
+                for number in range(1, self.weekly_sessions + 1)
+            ]
+        meeting_numbers = [session.meeting_number for session in self.sessions]
+        if len(set(meeting_numbers)) != len(meeting_numbers):
+            raise ValueError("شماره جلسه‌های هر گروه باید یکتا باشد")
+        self.sessions.sort(key=lambda session: session.meeting_number)
+        self.weekly_sessions = len(self.sessions)
+        self.week_pattern = self.sessions[0].week_pattern
         return self
 
 
@@ -86,6 +107,26 @@ class GenerateScheduleRequest(BaseModel):
         }
         if unknown:
             raise ValueError(f"زمان‌های ناشناخته: {sorted(unknown)}")
+        unknown_fixed_slots = {
+            session.fixed_slot_id
+            for offering in self.offerings
+            for session in offering.sessions
+            if session.fixed_slot_id and session.fixed_slot_id not in slot_ids
+        }
+        if unknown_fixed_slots:
+            raise ValueError(f"زمان ثابت ناشناخته: {sorted(unknown_fixed_slots)}")
+        unavailable_fixed_slots = [
+            f"{offering.title}، گروه {offering.group_number}، جلسه {session.meeting_number}"
+            for offering in self.offerings
+            for session in offering.sessions
+            if session.fixed_slot_id
+            and session.fixed_slot_id not in offering.available_slot_ids
+        ]
+        if unavailable_fixed_slots:
+            raise ValueError(
+                "زمان ثابت جلسه باید جزو ساعت‌های آزاد استاد باشد: "
+                + "، ".join(unavailable_fixed_slots)
+            )
         offering_ids = {offering.id for offering in self.offerings}
         if len(offering_ids) != len(self.offerings):
             raise ValueError("شناسه ارائه‌ها باید یکتا باشد")

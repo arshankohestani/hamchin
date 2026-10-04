@@ -13,6 +13,7 @@ from .models import (
     Metric,
     OfferingInput,
     ScheduleAssignment,
+    SessionInput,
 )
 from .repository import save_revision
 
@@ -90,14 +91,6 @@ def _default_demands(offerings: list[OfferingInput]) -> list[DemandGroup]:
 
 
 def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse:
-    for offering in request.offerings:
-        distinct_slots = len(set(offering.available_slot_ids))
-        if offering.weekly_sessions > distinct_slots:
-            return _infeasible_response(
-                request.name,
-                f"گروه {offering.group_number} درس «{offering.title}» به {offering.weekly_sessions} جلسه نیاز دارد اما فقط {distinct_slots} زمان آزاد متفاوت ثبت شده است.",
-            )
-
     compatible_rooms = {
         offering.id: [
             room
@@ -126,21 +119,30 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
     for offering in request.offerings:
         offerings_by_course[offering.course_id].append(offering.id)
 
-    meetings: list[tuple[str, OfferingInput, int]] = []
+    meetings: list[tuple[str, OfferingInput, SessionInput]] = []
     meetings_by_offering: dict[str, list[str]] = defaultdict(list)
     meeting_offering: dict[str, OfferingInput] = {}
+    meeting_session: dict[str, SessionInput] = {}
+    meeting_slots: dict[str, list[str]] = {}
     variables: dict[tuple[str, str], cp_model.IntVar] = {}
     placements: dict[tuple[str, str, str], cp_model.IntVar] = {}
     penalties: list[cp_model.LinearExpr] = []
 
     for offering in request.offerings:
-        for meeting_number in range(1, offering.weekly_sessions + 1):
-            meeting_id = f"{offering.id}-m{meeting_number}"
-            meetings.append((meeting_id, offering, meeting_number))
+        for session in offering.sessions:
+            meeting_id = f"{offering.id}-m{session.meeting_number}"
+            allowed_slots = (
+                [session.fixed_slot_id]
+                if session.fixed_slot_id
+                else list(dict.fromkeys(offering.available_slot_ids))
+            )
+            meetings.append((meeting_id, offering, session))
             meetings_by_offering[offering.id].append(meeting_id)
             meeting_offering[meeting_id] = offering
+            meeting_session[meeting_id] = session
+            meeting_slots[meeting_id] = allowed_slots
             meeting_placements: list[cp_model.IntVar] = []
-            for slot_id in offering.available_slot_ids:
+            for slot_id in allowed_slots:
                 variables[(meeting_id, slot_id)] = model.new_bool_var(
                     f"x_{meeting_id}_{slot_id}"
                 )
@@ -158,31 +160,33 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
             model.add_exactly_one(meeting_placements)
 
             locked_slot = request.locked_assignments.get(meeting_id)
-            if meeting_number == 1:
+            if session.meeting_number == 1:
                 locked_slot = locked_slot or request.locked_assignments.get(offering.id)
             if locked_slot:
-                if locked_slot not in offering.available_slot_ids:
+                if locked_slot not in allowed_slots:
                     raise ValueError(
-                        f"زمان قفل‌شده برای {offering.title} در دسترس استاد نیست"
+                        f"زمان قفل‌شده برای جلسه {session.meeting_number} درس {offering.title} مجاز نیست"
                     )
                 model.add(variables[(meeting_id, locked_slot)] == 1)
 
-    # جلسات یک گروه نمی‌توانند در یک بازه تکرار شوند.
+    # جلسات یک گروه فقط زمانی می‌توانند یک ساعت مشترک داشته باشند که هفته‌هایشان هم‌پوشانی نداشته باشد.
     for offering in request.offerings:
-        for slot_id in offering.available_slot_ids:
-            model.add(
-                sum(
+        for layer in ("odd", "even"):
+            for slot_id in offering.available_slot_ids:
+                uses = [
                     variables[(meeting_id, slot_id)]
                     for meeting_id in meetings_by_offering[offering.id]
-                )
-                <= 1
-            )
+                    if layer in _active_layers(meeting_session[meeting_id].week_pattern)
+                    and slot_id in meeting_slots[meeting_id]
+                ]
+                if uses:
+                    model.add(sum(uses) <= 1)
 
     # هفته زوج و فرد دو لایه مستقل‌اند؛ «هر هفته» در هر دو لایه حضور دارد.
     by_instructor_layer_slot: dict[tuple[str, str, str], list[cp_model.IntVar]] = defaultdict(list)
-    for meeting_id, offering, _ in meetings:
-        for layer in _active_layers(offering.week_pattern):
-            for slot_id in offering.available_slot_ids:
+    for meeting_id, offering, session in meetings:
+        for layer in _active_layers(session.week_pattern):
+            for slot_id in meeting_slots[meeting_id]:
                 by_instructor_layer_slot[(offering.instructor, layer, slot_id)].append(
                     variables[(meeting_id, slot_id)]
                 )
@@ -191,8 +195,8 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
 
     by_room_layer_slot: dict[tuple[str, str, str], list[cp_model.IntVar]] = defaultdict(list)
     for (meeting_id, slot_id, room_id), placement in placements.items():
-        offering = meeting_offering[meeting_id]
-        for layer in _active_layers(offering.week_pattern):
+        session = meeting_session[meeting_id]
+        for layer in _active_layers(session.week_pattern):
             by_room_layer_slot[(room_id, layer, slot_id)].append(placement)
     for uses in by_room_layer_slot.values():
         model.add(sum(uses) <= 1)
@@ -206,10 +210,14 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         left = offering_by_id[key[0]]
         right = offering_by_id[key[1]]
         collisions: list[cp_model.IntVar] = []
-        if _weeks_overlap(left.week_pattern, right.week_pattern):
-            shared_slots = set(left.available_slot_ids) & set(right.available_slot_ids)
-            for left_meeting in meetings_by_offering[left.id]:
-                for right_meeting in meetings_by_offering[right.id]:
+        for left_meeting in meetings_by_offering[left.id]:
+            for right_meeting in meetings_by_offering[right.id]:
+                left_session = meeting_session[left_meeting]
+                right_session = meeting_session[right_meeting]
+                if _weeks_overlap(left_session.week_pattern, right_session.week_pattern):
+                    shared_slots = set(meeting_slots[left_meeting]) & set(
+                        meeting_slots[right_meeting]
+                    )
                     for slot_id in shared_slots:
                         collision = model.new_bool_var(
                             f"collision_{left_meeting}_{right_meeting}_{slot_id}"
@@ -336,10 +344,10 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         )
 
     assignments: list[ScheduleAssignment] = []
-    for meeting_id, offering, meeting_number in meetings:
+    for meeting_id, offering, session in meetings:
         selected_slot = next(
             slot_by_id[slot_id]
-            for slot_id in offering.available_slot_ids
+            for slot_id in meeting_slots[meeting_id]
             if solver.value(variables[(meeting_id, slot_id)])
         )
         selected_room = next(
@@ -356,8 +364,8 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
                 course_title=offering.title,
                 instructor=offering.instructor,
                 group_number=offering.group_number,
-                meeting_number=meeting_number,
-                week_pattern=offering.week_pattern,
+                meeting_number=session.meeting_number,
+                week_pattern=session.week_pattern,
                 capacity=offering.capacity,
                 semester=offering.preferred_semester,
                 kind=offering.kind,
@@ -433,7 +441,10 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         else f"{len(demands)} سناریوی تقاضای برآوردی؛ {len(request.conflict_groups)} دسته منع تداخل قطعی؛ هنوز بدون آمار واقعی دانشگاه"
     )
     rotating_count = sum(
-        1 for offering in request.offerings if offering.week_pattern != "every"
+        1
+        for offering in request.offerings
+        for session in offering.sessions
+        if session.week_pattern != "every"
     )
     insights = [
         f"برای {len(request.offerings)} گروه درسی، {len(assignments)} جلسه قابل اجرا پیدا شد.",
@@ -442,7 +453,7 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
     ]
     if rotating_count:
         insights.append(
-            f"{rotating_count} گروه چرخشی زوج/فرد با تفکیک واقعی هفته‌ها زمان‌بندی شد."
+            f"{rotating_count} جلسه چرخشی زوج/فرد با تفکیک واقعی هفته‌ها زمان‌بندی شد."
         )
     if priority_titles:
         insights.append(

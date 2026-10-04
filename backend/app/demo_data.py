@@ -1,4 +1,4 @@
-from .models import ConflictGroup, DemandGroup, OfferingInput, RoomInput, TimeSlot
+from .models import ConflictGroup, DemandGroup, OfferingInput, RoomInput, SessionInput, TimeSlot
 
 
 SLOTS = [
@@ -28,7 +28,7 @@ ROOMS = [
 
 
 OFFERINGS = [
-    OfferingInput(id="diff-g1", course_id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, group_number=1, weekly_sessions=2, capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
+    OfferingInput(id="diff-g1", course_id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, group_number=1, weekly_sessions=2, sessions=[SessionInput(meeting_number=1, week_pattern="every"), SessionInput(meeting_number=2, week_pattern="odd", fixed_slot_id="tue-08")], capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
     OfferingInput(id="diff-g2", course_id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, group_number=2, weekly_sessions=1, capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
     OfferingInput(id="data-g1", course_id="data", code="CSE-110", title="ساختمان داده‌ها و الگوریتم‌ها", instructor="دکتر کاظمی", preferred_semester=3, group_number=1, weekly_sessions=1, capacity=34, available_slot_ids=["sat-10", "sun-08", "mon-14", "tue-10"], flexibility=5),
     OfferingInput(id="data-g2", course_id="data", code="CSE-110", title="ساختمان داده‌ها و الگوریتم‌ها", instructor="دکتر کاظمی", preferred_semester=3, group_number=2, weekly_sessions=1, capacity=34, available_slot_ids=["sat-10", "sun-08", "mon-14", "tue-10"], flexibility=5),

@@ -4,6 +4,19 @@ from fastapi.testclient import TestClient
 
 from app.demo_data import CONFLICT_GROUPS, DEMAND_GROUPS, OFFERINGS, ROOMS, SLOTS
 from app.main import app
+from app.models import SessionInput
+
+
+def one_session(
+    pattern: str = "every", fixed_slot_id: str | None = None
+) -> list[SessionInput]:
+    return [
+        SessionInput(
+            meeting_number=1,
+            week_pattern=pattern,
+            fixed_slot_id=fixed_slot_id,
+        )
+    ]
 
 
 def week_layers(pattern: str) -> tuple[str, ...]:
@@ -56,7 +69,7 @@ def test_generate_demo_schedule() -> None:
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["status"] == "draft"
-        assert len(data["assignments"]) == sum(item.weekly_sessions for item in OFFERINGS)
+        assert len(data["assignments"]) == sum(len(item.sessions) for item in OFFERINGS)
         assert data["revision_id"] > 0
         assert 0 <= data["coverage_percent"] <= 100
         assert "دسته منع تداخل قطعی" in data["demand_basis"]
@@ -83,7 +96,7 @@ def test_generate_demo_schedule() -> None:
             )
 
         for offering in OFFERINGS:
-            assert len(meetings_by_offering[offering.id]) == offering.weekly_sessions
+            assert len(meetings_by_offering[offering.id]) == len(offering.sessions)
 
         assignments_by_offering: dict[str, list[dict]] = {}
         for assignment in data["assignments"]:
@@ -128,6 +141,7 @@ def test_report_infeasible_instructor_schedule() -> None:
             "course_id": "a",
             "group_number": 1,
             "weekly_sessions": 1,
+            "sessions": one_session(),
             "available_slot_ids": ["sat-08"],
         }
     )
@@ -137,6 +151,7 @@ def test_report_infeasible_instructor_schedule() -> None:
             "course_id": "b",
             "group_number": 1,
             "weekly_sessions": 1,
+            "sessions": one_session(),
             "available_slot_ids": ["sat-08"],
         }
     )
@@ -156,7 +171,7 @@ def test_report_infeasible_instructor_schedule() -> None:
 
 def test_report_missing_compatible_room() -> None:
     large = OFFERINGS[0].model_copy(
-        update={"weekly_sessions": 1, "capacity": 300}
+        update={"weekly_sessions": 1, "sessions": one_session(), "capacity": 300}
     )
     payload = {
         "name": "کلاس ناکافی",
@@ -190,6 +205,7 @@ def test_high_weight_demand_pair_is_kept_conflict_free() -> None:
                     "instructor": instructor,
                     "group_number": 1,
                     "weekly_sessions": 1,
+                    "sessions": one_session(),
                     "capacity": 30,
                     "available_slot_ids": shared_slots,
                 }
@@ -236,6 +252,7 @@ def test_odd_and_even_groups_can_share_teacher_room_and_time() -> None:
             "course_id": "rotating-a",
             "weekly_sessions": 1,
             "week_pattern": "odd",
+            "sessions": one_session("odd"),
             "available_slot_ids": ["sat-08"],
         }
     )
@@ -245,6 +262,7 @@ def test_odd_and_even_groups_can_share_teacher_room_and_time() -> None:
             "course_id": "rotating-b",
             "weekly_sessions": 1,
             "week_pattern": "even",
+            "sessions": one_session("even"),
             "available_slot_ids": ["sat-08"],
         }
     )
@@ -263,6 +281,69 @@ def test_odd_and_even_groups_can_share_teacher_room_and_time() -> None:
         assert len({item["room"] for item in data["assignments"]}) == 1
 
 
+def test_sessions_of_one_group_can_have_independent_patterns_and_fixed_times() -> None:
+    offering = OFFERINGS[0].model_copy(
+        update={
+            "id": "mixed-session-g1",
+            "course_id": "mixed-session",
+            "weekly_sessions": 2,
+            "week_pattern": "every",
+            "sessions": [
+                SessionInput(
+                    meeting_number=1,
+                    week_pattern="every",
+                    fixed_slot_id="sat-08",
+                ),
+                SessionInput(
+                    meeting_number=2,
+                    week_pattern="odd",
+                    fixed_slot_id="mon-10",
+                ),
+            ],
+            "available_slot_ids": ["sat-08", "mon-10"],
+        }
+    )
+    payload = {
+        "offerings": [offering.model_dump()],
+        "slots": [item.model_dump() for item in SLOTS],
+        "rooms": [ROOMS[0].model_dump()],
+    }
+    with TestClient(app) as client:
+        response = client.post("/api/schedules/generate", json=payload)
+        assert response.status_code == 200, response.text
+        assignments = {
+            item["meeting_number"]: (item["week_pattern"], item["slot"]["id"])
+            for item in response.json()["assignments"]
+        }
+        assert assignments == {
+            1: ("every", "sat-08"),
+            2: ("odd", "mon-10"),
+        }
+
+
+def test_fixed_session_time_must_be_in_teacher_availability() -> None:
+    payload = demo_payload()
+    payload["offerings"] = [
+        {
+            **OFFERINGS[1].model_dump(),
+            "available_slot_ids": ["sat-08"],
+            "sessions": [
+                {
+                    "meeting_number": 1,
+                    "week_pattern": "every",
+                    "fixed_slot_id": "mon-10",
+                }
+            ],
+        }
+    ]
+    payload["demand_groups"] = []
+    payload["conflict_groups"] = []
+    with TestClient(app) as client:
+        response = client.post("/api/schedules/generate", json=payload)
+        assert response.status_code == 422
+        assert "ساعت‌های آزاد استاد" in response.text
+
+
 def test_strict_conflict_group_can_make_schedule_infeasible() -> None:
     first = OFFERINGS[0].model_copy(
         update={
@@ -270,6 +351,7 @@ def test_strict_conflict_group_can_make_schedule_infeasible() -> None:
             "course_id": "course-a",
             "instructor": "teacher-a",
             "weekly_sessions": 1,
+            "sessions": one_session(),
             "available_slot_ids": ["sat-08"],
         }
     )
@@ -279,6 +361,7 @@ def test_strict_conflict_group_can_make_schedule_infeasible() -> None:
             "course_id": "course-b",
             "instructor": "teacher-b",
             "weekly_sessions": 1,
+            "sessions": one_session(),
             "available_slot_ids": ["sat-08"],
         }
     )

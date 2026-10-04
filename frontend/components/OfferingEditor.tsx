@@ -12,7 +12,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import type { Offering, Slot } from "@/lib/types";
+import type { CourseSession, Offering, Slot } from "@/lib/types";
 
 type Props = {
   offerings: Offering[];
@@ -20,7 +20,7 @@ type Props = {
   onChange: (offerings: Offering[]) => void;
 };
 
-const weekLabels: Record<Offering["week_pattern"], string> = {
+const weekLabels: Record<CourseSession["week_pattern"], string> = {
   every: "هر هفته",
   odd: "هفته‌های فرد",
   even: "هفته‌های زوج",
@@ -41,6 +41,18 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
     );
   }
 
+  function setSessions(item: Offering, sessions: CourseSession[]) {
+    const normalized = sessions.map((session, index) => ({
+      ...session,
+      meeting_number: index + 1,
+    }));
+    update(item.id, {
+      sessions: normalized,
+      weekly_sessions: normalized.length,
+      week_pattern: normalized[0]?.week_pattern ?? "every",
+    });
+  }
+
   const activeOfferings = offerings.filter((item) => item.enabled !== false);
   const activeCourses = new Set(activeOfferings.map((item) => item.course_id)).size;
 
@@ -57,6 +69,7 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
       group_number: 1,
       weekly_sessions: 1,
       week_pattern: "every",
+      sessions: [{ meeting_number: 1, week_pattern: "every", fixed_slot_id: null }],
       capacity: 35,
       available_slot_ids: slots.slice(0, 4).map((slot) => slot.id),
       flexibility: 3,
@@ -74,7 +87,7 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
       ...source,
       id: `${source.course_id}-g${nextGroup}-${Date.now()}`,
       group_number: nextGroup,
-      weekly_sessions: 1,
+      sessions: source.sessions.map((session) => ({ ...session, fixed_slot_id: null })),
       enabled: true,
     };
     onChange([...offerings, extra]);
@@ -93,7 +106,14 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
     const next = exists
       ? item.available_slot_ids.filter((id) => id !== slotId)
       : [...item.available_slot_ids, slotId];
-    if (next.length > 0) update(item.id, { available_slot_ids: next });
+    if (next.length > 0) {
+      update(item.id, {
+        available_slot_ids: next,
+        sessions: item.sessions.map((session) =>
+          session.fixed_slot_id === slotId ? { ...session, fixed_slot_id: null } : session,
+        ),
+      });
+    }
   }
 
   return (
@@ -114,6 +134,10 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
         {offerings.map((item) => {
           const enabled = item.enabled !== false;
           const sameCourseCount = offerings.filter((candidate) => candidate.course_id === item.course_id).length;
+          const patterns = new Set(item.sessions.map((session) => session.week_pattern));
+          const patternSummary = patterns.size === 1
+            ? weekLabels[item.sessions[0].week_pattern]
+            : "الگوی ترکیبی جلسات";
           return (
             <article className={`offering-card ${enabled ? "selected" : ""} ${expandedId === item.id ? "expanded" : ""}`} key={item.id}>
               <div className="offering-row">
@@ -134,16 +158,16 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
                   <div className="course-meta">
                     <span><UserRound size={14} />{item.instructor}</span>
                     <span><Clock3 size={14} />{item.available_slot_ids.length} زمان آزاد</span>
-                    <span>{weekLabels[item.week_pattern]}</span>
+                    <span>{patternSummary}</span>
                     <span className="code">{item.code}</span>
                   </div>
                 </div>
                 <div className="group-stepper">
-                  <span>جلسه در هفته</span>
+                  <span>تعداد جلسه</span>
                   <div>
-                    <button type="button" onClick={() => update(item.id, { weekly_sessions: Math.max(1, item.weekly_sessions - 1) })}><Minus size={14} /></button>
-                    <strong>{item.weekly_sessions}</strong>
-                    <button type="button" onClick={() => update(item.id, { weekly_sessions: Math.min(6, item.weekly_sessions + 1) })}><Plus size={14} /></button>
+                    <button type="button" onClick={() => setSessions(item, item.sessions.slice(0, Math.max(1, item.sessions.length - 1)))}><Minus size={14} /></button>
+                    <strong>{item.sessions.length}</strong>
+                    <button type="button" onClick={() => item.sessions.length < 6 && setSessions(item, [...item.sessions, { meeting_number: item.sessions.length + 1, week_pattern: "every", fixed_slot_id: null }])}><Plus size={14} /></button>
                   </div>
                 </div>
                 <button className="edit-course-button" type="button" onClick={() => addExtraGroup(item)} aria-label={`افزودن گروه مازاد برای ${item.title}`} title="افزودن گروه مازاد">
@@ -161,9 +185,50 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
                   <label><span>شماره گروه</span><input type="number" min={1} max={99} value={item.group_number} onChange={(event) => update(item.id, { group_number: Number(event.target.value) })} /></label>
                   <label><span>نام استاد این گروه</span><input value={item.instructor} onChange={(event) => update(item.id, { instructor: event.target.value })} /></label>
                   <label><span>ظرفیت این گروه</span><input type="number" min={5} max={300} value={item.capacity} onChange={(event) => update(item.id, { capacity: Number(event.target.value) })} /></label>
-                  <label><span>الگوی برگزاری</span><select value={item.week_pattern} onChange={(event) => update(item.id, { week_pattern: event.target.value as Offering["week_pattern"] })}><option value="every">هر هفته</option><option value="odd">فقط هفته‌های فرد</option><option value="even">فقط هفته‌های زوج</option></select></label>
                   <label><span>ترم پیشنهادی</span><select value={item.preferred_semester} onChange={(event) => updateCourse(item, { preferred_semester: Number(event.target.value) })}>{[1,2,3,4,5,6,7,8].map((semester) => <option key={semester} value={semester}>ترم {semester}</option>)}</select></label>
                   <label><span>نوع درس</span><select value={item.kind} onChange={(event) => updateCourse(item, { kind: event.target.value as Offering["kind"] })}><option value="theory">نظری</option><option value="lab">آزمایشگاهی</option><option value="skill">مهارتی</option></select></label>
+                  <div className="session-config">
+                    <div className="session-config-heading">
+                      <strong>تنظیم جداگانه جلسه‌ها</strong>
+                      <span>برای هر جلسه، نوع هفته و روز و ساعت را مستقل انتخاب کنید.</span>
+                    </div>
+                    {item.sessions.map((session, sessionIndex) => (
+                      <div className="session-row" key={session.meeting_number}>
+                        <span className="session-number">جلسه {session.meeting_number}</span>
+                        <label>
+                          <span>نحوه تکرار</span>
+                          <select
+                            value={session.week_pattern}
+                            onChange={(event) => setSessions(item, item.sessions.map((candidate, index) =>
+                              index === sessionIndex
+                                ? { ...candidate, week_pattern: event.target.value as CourseSession["week_pattern"] }
+                                : candidate,
+                            ))}
+                          >
+                            <option value="every">هر هفته</option>
+                            <option value="odd">فقط هفته‌های فرد</option>
+                            <option value="even">فقط هفته‌های زوج</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>روز و ساعت این جلسه</span>
+                          <select
+                            value={session.fixed_slot_id ?? ""}
+                            onChange={(event) => setSessions(item, item.sessions.map((candidate, index) =>
+                              index === sessionIndex
+                                ? { ...candidate, fixed_slot_id: event.target.value || null }
+                                : candidate,
+                            ))}
+                          >
+                            <option value="">انتخاب هوشمند از ساعت‌های آزاد استاد</option>
+                            {slots
+                              .filter((slot) => item.available_slot_ids.includes(slot.id))
+                              .map((slot) => <option key={slot.id} value={slot.id}>{slot.label}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
                   <div className="group-tools">
                     <button type="button" onClick={() => addExtraGroup(item)}><CopyPlus size={14} /> افزودن گروه مازاد با امکان استاد متفاوت</button>
                     <button type="button" className="danger" disabled={sameCourseCount <= 1} onClick={() => removeGroup(item)}><Trash2 size={14} /> حذف این گروه</button>

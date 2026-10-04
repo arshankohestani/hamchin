@@ -42,7 +42,7 @@ export default function Home() {
       .then((data) => {
         let restored: Offering[] | null = null;
         try {
-          const saved = window.localStorage.getItem("hamchin-offerings-v2");
+          const saved = window.localStorage.getItem("hamchin-offerings-v3");
           const parsed: unknown = saved ? JSON.parse(saved) : null;
           if (Array.isArray(parsed) && parsed.length > 0) restored = parsed as Offering[];
         } catch {
@@ -80,7 +80,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading && offerings.length > 0) {
-      window.localStorage.setItem("hamchin-offerings-v2", JSON.stringify(offerings));
+      window.localStorage.setItem("hamchin-offerings-v3", JSON.stringify(offerings));
     }
   }, [loading, offerings]);
 
@@ -101,7 +101,7 @@ export default function Home() {
     return [...unique.values()];
   }, [activeOfferings]);
   const totalGroups = activeOfferings.length;
-  const totalMeetings = activeOfferings.reduce((sum, item) => sum + item.weekly_sessions, 0);
+  const totalMeetings = activeOfferings.reduce((sum, item) => sum + item.sessions.length, 0);
 
   async function handleGenerate() {
     if (!activeOfferings.length) {
