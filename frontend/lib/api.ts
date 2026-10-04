@@ -1,4 +1,4 @@
-import type { DemandGroup, DemoData, Offering, Room, ScheduleResult, Slot } from "./types";
+import type { ConflictGroup, DemandGroup, DemoData, Offering, Room, ScheduleResult, Slot } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -24,6 +24,7 @@ export function generateSchedule(input: {
   slots: Slot[];
   rooms: Room[];
   demand_groups: DemandGroup[];
+  conflict_groups: ConflictGroup[];
   priority: { course_ids: string[]; semester: number | null; strength: number; note: string };
 }): Promise<ScheduleResult> {
   return request<ScheduleResult>("/api/schedules/generate", {

@@ -1,4 +1,4 @@
-from .models import DemandGroup, OfferingInput, RoomInput, TimeSlot
+from .models import ConflictGroup, DemandGroup, OfferingInput, RoomInput, TimeSlot
 
 
 SLOTS = [
@@ -28,15 +28,20 @@ ROOMS = [
 
 
 OFFERINGS = [
-    OfferingInput(id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, groups=2, capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
-    OfferingInput(id="data", code="CSE-110", title="ساختمان داده‌ها و الگوریتم‌ها", instructor="دکتر کاظمی", preferred_semester=3, groups=2, capacity=34, available_slot_ids=["sat-10", "sun-08", "mon-14", "tue-10"], flexibility=5),
-    OfferingInput(id="soft", code="CSE-150", title="مهارت‌های نرم شغلی", instructor="دکتر نادری", preferred_semester=3, groups=2, capacity=40, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=5, kind="skill"),
-    OfferingInput(id="ai", code="CSE-116", title="هوش مصنوعی", instructor="دکتر پارسا", preferred_semester=5, groups=1, capacity=36, available_slot_ids=["sat-08", "sun-10", "mon-14"], flexibility=4),
-    OfferingInput(id="os", code="CSE-118", title="سیستم‌های عامل", instructor="دکتر سهرابی", preferred_semester=5, groups=2, capacity=32, available_slot_ids=["sat-10", "sun-14", "mon-08", "tue-10"], flexibility=5),
-    OfferingInput(id="research", code="CSE-120", title="روش پژوهش و ارائه", instructor="دکتر رهنما", preferred_semester=5, groups=1, capacity=42, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=3),
-    OfferingInput(id="network", code="CSE-122", title="شبکه‌های کامپیوتری", instructor="دکتر کیانی", preferred_semester=6, groups=2, capacity=35, available_slot_ids=["sat-14", "sun-08", "mon-10", "tue-14"], flexibility=5),
-    OfferingInput(id="analysis", code="CSE-121", title="تحلیل و طراحی نرم‌افزار", instructor="دکتر نادری", preferred_semester=6, groups=1, capacity=38, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=4),
-    OfferingInput(id="security", code="CSE-124", title="امنیت سیستم‌های کامپیوتری", instructor="دکتر پارسا", preferred_semester=7, groups=1, capacity=34, available_slot_ids=["sat-08", "sun-10", "mon-14"], flexibility=3),
+    OfferingInput(id="diff-g1", course_id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, group_number=1, weekly_sessions=2, capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
+    OfferingInput(id="diff-g2", course_id="diff", code="SCI-103", title="معادلات دیفرانسیل", instructor="دکتر رهنما", preferred_semester=3, group_number=2, weekly_sessions=1, capacity=38, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=5),
+    OfferingInput(id="data-g1", course_id="data", code="CSE-110", title="ساختمان داده‌ها و الگوریتم‌ها", instructor="دکتر کاظمی", preferred_semester=3, group_number=1, weekly_sessions=1, capacity=34, available_slot_ids=["sat-10", "sun-08", "mon-14", "tue-10"], flexibility=5),
+    OfferingInput(id="data-g2", course_id="data", code="CSE-110", title="ساختمان داده‌ها و الگوریتم‌ها", instructor="دکتر کاظمی", preferred_semester=3, group_number=2, weekly_sessions=1, capacity=34, available_slot_ids=["sat-10", "sun-08", "mon-14", "tue-10"], flexibility=5),
+    OfferingInput(id="soft-g1", course_id="soft", code="CSE-150", title="مهارت‌های نرم شغلی", instructor="دکتر نادری", preferred_semester=3, group_number=1, weekly_sessions=1, capacity=40, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=5, kind="skill"),
+    OfferingInput(id="soft-g2", course_id="soft", code="CSE-150", title="مهارت‌های نرم شغلی", instructor="دکتر نادری", preferred_semester=3, group_number=2, weekly_sessions=1, week_pattern="even", capacity=40, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=5, kind="skill"),
+    OfferingInput(id="ai-g1", course_id="ai", code="CSE-116", title="هوش مصنوعی", instructor="دکتر پارسا", preferred_semester=5, group_number=1, weekly_sessions=1, capacity=36, available_slot_ids=["sat-08", "sun-10", "mon-14"], flexibility=4),
+    OfferingInput(id="os-g1", course_id="os", code="CSE-118", title="سیستم‌های عامل", instructor="دکتر سهرابی", preferred_semester=5, group_number=1, weekly_sessions=1, capacity=32, available_slot_ids=["sat-10", "sun-14", "mon-08", "tue-10"], flexibility=5),
+    OfferingInput(id="os-g2", course_id="os", code="CSE-118", title="سیستم‌های عامل", instructor="دکتر سهرابی", preferred_semester=5, group_number=2, weekly_sessions=1, capacity=32, available_slot_ids=["sat-10", "sun-14", "mon-08", "tue-10"], flexibility=5),
+    OfferingInput(id="research-g1", course_id="research", code="CSE-120", title="روش پژوهش و ارائه", instructor="دکتر رهنما", preferred_semester=5, group_number=1, weekly_sessions=1, capacity=42, available_slot_ids=["sat-08", "sun-14", "mon-10", "tue-08"], flexibility=3),
+    OfferingInput(id="network-g1", course_id="network", code="CSE-122", title="شبکه‌های کامپیوتری", instructor="دکتر کیانی", preferred_semester=6, group_number=1, weekly_sessions=1, capacity=35, available_slot_ids=["sat-14", "sun-08", "mon-10", "tue-14"], flexibility=5),
+    OfferingInput(id="network-g2", course_id="network", code="CSE-122", title="شبکه‌های کامپیوتری", instructor="دکتر کیانی", preferred_semester=6, group_number=2, weekly_sessions=1, capacity=35, available_slot_ids=["sat-14", "sun-08", "mon-10", "tue-14"], flexibility=5),
+    OfferingInput(id="analysis-g1", course_id="analysis", code="CSE-121", title="تحلیل و طراحی نرم‌افزار", instructor="دکتر نادری", preferred_semester=6, group_number=1, weekly_sessions=1, capacity=38, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=4),
+    OfferingInput(id="security-g1", course_id="security", code="CSE-124", title="امنیت سیستم‌های کامپیوتری", instructor="دکتر پارسا", preferred_semester=7, group_number=1, weekly_sessions=1, capacity=34, available_slot_ids=["sat-08", "sun-10", "mon-14"], flexibility=3),
 ]
 
 
@@ -47,5 +52,12 @@ DEMAND_GROUPS = [
     DemandGroup(id="semester-6", label="دانشجویان چارت ترم ۶", student_count=48, course_ids=["network", "analysis"], weight=5),
     DemandGroup(id="backlog-diff-5", label="ترم ۵ با معادلات عقب‌افتاده", student_count=18, course_ids=["diff", "ai", "os", "research"], weight=7),
     DemandGroup(id="soft-skills-7", label="ترم ۷ متقاضی مهارت‌های نرم", student_count=14, course_ids=["soft", "security", "network"], weight=7),
+]
+
+
+CONFLICT_GROUPS = [
+    ConflictGroup(id="entry-1403", label="چارت اصلی ترم سوم", entry_year="ورودی ۱۴۰۳", course_ids=["diff", "data", "soft"]),
+    ConflictGroup(id="entry-1401-backlog", label="ترم پنجم همراه معادلات عقب‌افتاده", entry_year="ورودی ۱۴۰۱", course_ids=["diff", "ai", "os", "research"]),
+    ConflictGroup(id="cross-semester", label="سبد انتخابی بین‌ترمی", entry_year="چند ورودی", course_ids=["soft", "network", "security"]),
 ]
 

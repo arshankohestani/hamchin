@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .demo_data import DEMAND_GROUPS, OFFERINGS, ROOMS, SLOTS
+from .demo_data import CONFLICT_GROUPS, DEMAND_GROUPS, OFFERINGS, ROOMS, SLOTS
 from .models import GenerateScheduleRequest, GenerateScheduleResponse
 from .repository import approve_revision, initialize_database, list_revisions
 from .solver import solve_schedule
@@ -55,6 +55,7 @@ def demo() -> dict:
         "rooms": [room.model_dump() for room in ROOMS],
         "offerings": [offering.model_dump() for offering in OFFERINGS],
         "demand_groups": [group.model_dump() for group in DEMAND_GROUPS],
+        "conflict_groups": [group.model_dump() for group in CONFLICT_GROUPS],
         "revisions": list_revisions(),
     }
 

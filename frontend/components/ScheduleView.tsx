@@ -5,6 +5,7 @@ import type { ScheduleResult } from "@/lib/types";
 
 const days = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه"];
 const times = ["08:00", "10:00", "14:00"];
+const weekLabels = { every: "هر هفته", odd: "هفته فرد", even: "هفته زوج" } as const;
 
 type Props = {
   result: ScheduleResult;
@@ -60,7 +61,8 @@ export function ScheduleView({ result, approving, approved, onApprove }: Props) 
                         {assignments.map((item) => (
                           <div className={`class-chip semester-${item.semester}`} key={item.section_id}>
                             <strong>{item.course_title}</strong>
-                            <span>گروه {item.group_number} · {item.instructor}</span>
+                            <span>گروه {item.group_number} · جلسه {item.meeting_number} · {item.instructor}</span>
+                            <small className="week-pattern">{weekLabels[item.week_pattern]}</small>
                             <small><MapPin size={11} />{item.room ?? "کلاس تعیین نشده"}</small>
                           </div>
                         ))}

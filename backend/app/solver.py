@@ -35,8 +35,20 @@ def _infeasible_response(name: str, message: str) -> GenerateScheduleResponse:
     )
 
 
+def _active_layers(pattern: str) -> tuple[str, ...]:
+    if pattern == "odd":
+        return ("odd",)
+    if pattern == "even":
+        return ("even",)
+    return ("odd", "even")
+
+
+def _weeks_overlap(left: str, right: str) -> bool:
+    return bool(set(_active_layers(left)) & set(_active_layers(right)))
+
+
 def _interpreted_priority(request: GenerateScheduleRequest) -> tuple[set[str], int | None]:
-    """Extract supported course names and a semester number from the Persian request."""
+    """Extract supported course names and a semester number from a Persian request."""
     note = request.priority.note.strip()
     normalized_note_words = set(note.replace("\u200c", " ").split())
     priority_ids = set(request.priority.course_ids)
@@ -47,13 +59,9 @@ def _interpreted_priority(request: GenerateScheduleRequest) -> tuple[set[str], i
             if word not in {"و", "های", "در", "با"}
         ]
         word_matches = sum(word in normalized_note_words for word in title_words)
-        fuzzy_title_match = word_matches >= 2 and word_matches / len(title_words) >= 0.6
-        if (
-            offering.title in note
-            or offering.code.lower() in note.lower()
-            or fuzzy_title_match
-        ):
-            priority_ids.add(offering.id)
+        fuzzy_title_match = bool(title_words) and word_matches >= 2 and word_matches / len(title_words) >= 0.6
+        if offering.title in note or offering.code.lower() in note.lower() or fuzzy_title_match:
+            priority_ids.add(offering.course_id)
 
     semester = request.priority.semester
     normalized_note = note.translate(PERSIAN_DIGITS)
@@ -64,15 +72,15 @@ def _interpreted_priority(request: GenerateScheduleRequest) -> tuple[set[str], i
 
 
 def _default_demands(offerings: list[OfferingInput]) -> list[DemandGroup]:
-    by_semester: dict[int, list[str]] = defaultdict(list)
+    by_semester: dict[int, set[str]] = defaultdict(set)
     for offering in offerings:
-        by_semester[offering.preferred_semester].append(offering.id)
+        by_semester[offering.preferred_semester].add(offering.course_id)
     return [
         DemandGroup(
             id=f"semester-{semester}",
             label=f"چارت پیشنهادی ترم {semester}",
             student_count=1,
-            course_ids=course_ids,
+            course_ids=sorted(course_ids),
             weight=5,
             source="estimated",
         )
@@ -83,26 +91,11 @@ def _default_demands(offerings: list[OfferingInput]) -> list[DemandGroup]:
 
 def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse:
     for offering in request.offerings:
-        if offering.groups > len(offering.available_slot_ids):
+        distinct_slots = len(set(offering.available_slot_ids))
+        if offering.weekly_sessions > distinct_slots:
             return _infeasible_response(
                 request.name,
-                f"درس «{offering.title}» {offering.groups} گروه دارد اما فقط {len(offering.available_slot_ids)} زمان متفاوت برای استاد ثبت شده است.",
-            )
-
-    offerings_by_instructor: dict[str, list[OfferingInput]] = defaultdict(list)
-    for offering in request.offerings:
-        offerings_by_instructor[offering.instructor].append(offering)
-    for instructor, instructor_offerings in offerings_by_instructor.items():
-        required_sections = sum(offering.groups for offering in instructor_offerings)
-        available_slots = {
-            slot_id
-            for offering in instructor_offerings
-            for slot_id in offering.available_slot_ids
-        }
-        if required_sections > len(available_slots):
-            return _infeasible_response(
-                request.name,
-                f"{instructor} باید {required_sections} گروه ارائه دهد اما فقط {len(available_slots)} بازه غیرهم‌زمان دارد.",
+                f"گروه {offering.group_number} درس «{offering.title}» به {offering.weekly_sessions} جلسه نیاز دارد اما فقط {distinct_slots} زمان آزاد متفاوت ثبت شده است.",
             )
 
     compatible_rooms = {
@@ -115,128 +108,172 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         for offering in request.offerings
     }
     without_room = [
-        offering.title
+        f"{offering.title}، گروه {offering.group_number}"
         for offering in request.offerings
         if not compatible_rooms[offering.id]
     ]
     if without_room:
         return _infeasible_response(
             request.name,
-            f"برای ظرفیت یا نوع درس «{'، '.join(without_room)}» هیچ کلاس سازگاری وجود ندارد.",
+            f"برای ظرفیت یا نوع ارائهٔ «{'، '.join(without_room)}» هیچ کلاس سازگاری وجود ندارد.",
         )
 
     model = cp_model.CpModel()
     slot_by_id = {slot.id: slot for slot in request.slots}
     room_by_id = {room.id: room for room in request.rooms}
-    sections: list[tuple[str, OfferingInput, int]] = []
-    sections_by_course: dict[str, list[str]] = defaultdict(list)
+    offering_by_id = {offering.id: offering for offering in request.offerings}
+    offerings_by_course: dict[str, list[str]] = defaultdict(list)
+    for offering in request.offerings:
+        offerings_by_course[offering.course_id].append(offering.id)
+
+    meetings: list[tuple[str, OfferingInput, int]] = []
+    meetings_by_offering: dict[str, list[str]] = defaultdict(list)
+    meeting_offering: dict[str, OfferingInput] = {}
     variables: dict[tuple[str, str], cp_model.IntVar] = {}
     placements: dict[tuple[str, str, str], cp_model.IntVar] = {}
+    penalties: list[cp_model.LinearExpr] = []
 
     for offering in request.offerings:
-        for group_number in range(1, offering.groups + 1):
-            section_id = f"{offering.id}-g{group_number}"
-            sections.append((section_id, offering, group_number))
-            sections_by_course[offering.id].append(section_id)
-            section_placements: list[cp_model.IntVar] = []
+        for meeting_number in range(1, offering.weekly_sessions + 1):
+            meeting_id = f"{offering.id}-m{meeting_number}"
+            meetings.append((meeting_id, offering, meeting_number))
+            meetings_by_offering[offering.id].append(meeting_id)
+            meeting_offering[meeting_id] = offering
+            meeting_placements: list[cp_model.IntVar] = []
             for slot_id in offering.available_slot_ids:
-                variables[(section_id, slot_id)] = model.new_bool_var(f"x_{section_id}_{slot_id}")
+                variables[(meeting_id, slot_id)] = model.new_bool_var(
+                    f"x_{meeting_id}_{slot_id}"
+                )
                 slot_placements: list[cp_model.IntVar] = []
                 for room in compatible_rooms[offering.id]:
                     placement = model.new_bool_var(
-                        f"place_{section_id}_{slot_id}_{room.id}"
+                        f"place_{meeting_id}_{slot_id}_{room.id}"
                     )
-                    placements[(section_id, slot_id, room.id)] = placement
+                    placements[(meeting_id, slot_id, room.id)] = placement
                     slot_placements.append(placement)
-                    section_placements.append(placement)
-                model.add(
-                    variables[(section_id, slot_id)] == sum(slot_placements)
-                )
-            model.add_exactly_one(section_placements)
+                    meeting_placements.append(placement)
+                    if offering.kind != "lab" and room.kind == "lab":
+                        penalties.append(3 * placement)
+                model.add(variables[(meeting_id, slot_id)] == sum(slot_placements))
+            model.add_exactly_one(meeting_placements)
 
-            locked_slot = request.locked_assignments.get(offering.id)
+            locked_slot = request.locked_assignments.get(meeting_id)
+            if meeting_number == 1:
+                locked_slot = locked_slot or request.locked_assignments.get(offering.id)
             if locked_slot:
                 if locked_slot not in offering.available_slot_ids:
-                    raise ValueError(f"زمان قفل‌شده برای {offering.title} در دسترس استاد نیست")
-                # قفل درس روی گروه اول اعمال می‌شود و گروه‌های دیگر آزادی ایجاد می‌کنند.
-                if group_number == 1:
-                    model.add(variables[(section_id, locked_slot)] == 1)
+                    raise ValueError(
+                        f"زمان قفل‌شده برای {offering.title} در دسترس استاد نیست"
+                    )
+                model.add(variables[(meeting_id, locked_slot)] == 1)
 
-    # محدودیت قطعی: استاد در یک بازه فقط یک کلاس دارد.
-    by_instructor_slot: dict[tuple[str, str], list[cp_model.IntVar]] = defaultdict(list)
-    for section_id, offering, _ in sections:
+    # جلسات یک گروه نمی‌توانند در یک بازه تکرار شوند.
+    for offering in request.offerings:
         for slot_id in offering.available_slot_ids:
-            by_instructor_slot[(offering.instructor, slot_id)].append(
-                variables[(section_id, slot_id)]
+            model.add(
+                sum(
+                    variables[(meeting_id, slot_id)]
+                    for meeting_id in meetings_by_offering[offering.id]
+                )
+                <= 1
             )
-    for vars_at_time in by_instructor_slot.values():
-        model.add(sum(vars_at_time) <= 1)
 
-    # گروه‌های موازی یک درس باید در زمان‌های متفاوت باشند.
-    by_course_slot: dict[tuple[str, str], list[cp_model.IntVar]] = defaultdict(list)
-    for section_id, offering, _ in sections:
-        for slot_id in offering.available_slot_ids:
-            by_course_slot[(offering.id, slot_id)].append(variables[(section_id, slot_id)])
-    for vars_at_time in by_course_slot.values():
-        model.add(sum(vars_at_time) <= 1)
+    # هفته زوج و فرد دو لایه مستقل‌اند؛ «هر هفته» در هر دو لایه حضور دارد.
+    by_instructor_layer_slot: dict[tuple[str, str, str], list[cp_model.IntVar]] = defaultdict(list)
+    for meeting_id, offering, _ in meetings:
+        for layer in _active_layers(offering.week_pattern):
+            for slot_id in offering.available_slot_ids:
+                by_instructor_layer_slot[(offering.instructor, layer, slot_id)].append(
+                    variables[(meeting_id, slot_id)]
+                )
+    for uses in by_instructor_layer_slot.values():
+        model.add(sum(uses) <= 1)
 
-    # محدودیت قطعی: یک کلاس یا آزمایشگاه در یک زمان فقط به یک گروه اختصاص دارد.
-    for slot in request.slots:
-        for room in request.rooms:
-            room_uses = [
-                placement
-                for (section_id, slot_id, room_id), placement in placements.items()
-                if slot_id == slot.id and room_id == room.id
-            ]
-            if room_uses:
-                model.add(sum(room_uses) <= 1)
+    by_room_layer_slot: dict[tuple[str, str, str], list[cp_model.IntVar]] = defaultdict(list)
+    for (meeting_id, slot_id, room_id), placement in placements.items():
+        offering = meeting_offering[meeting_id]
+        for layer in _active_layers(offering.week_pattern):
+            by_room_layer_slot[(room_id, layer, slot_id)].append(placement)
+    for uses in by_room_layer_slot.values():
+        model.add(sum(uses) <= 1)
 
-    offering_by_id = {offering.id: offering for offering in request.offerings}
-    section_offering = {section_id: offering for section_id, offering, _ in sections}
-    same_time_cache: dict[tuple[str, str], cp_model.IntVar] = {}
+    section_conflict_cache: dict[tuple[str, str], cp_model.IntVar] = {}
 
-    def same_time(left_section: str, right_section: str) -> cp_model.IntVar:
-        key = tuple(sorted((left_section, right_section)))
-        if key in same_time_cache:
-            return same_time_cache[key]
-        left = section_offering[left_section]
-        right = section_offering[right_section]
-        shared_slots = set(left.available_slot_ids) & set(right.available_slot_ids)
+    def sections_conflict(left_id: str, right_id: str) -> cp_model.IntVar:
+        key = tuple(sorted((left_id, right_id)))
+        if key in section_conflict_cache:
+            return section_conflict_cache[key]
+        left = offering_by_id[key[0]]
+        right = offering_by_id[key[1]]
         collisions: list[cp_model.IntVar] = []
-        for slot_id in shared_slots:
-            collision = model.new_bool_var(
-                f"collision_{key[0]}_{key[1]}_{slot_id}"
-            )
-            left_var = variables[(left_section, slot_id)]
-            right_var = variables[(right_section, slot_id)]
-            model.add(collision <= left_var)
-            model.add(collision <= right_var)
-            model.add(collision >= left_var + right_var - 1)
-            collisions.append(collision)
-        same = model.new_bool_var(f"same_{key[0]}_{key[1]}")
-        model.add(same == sum(collisions)) if collisions else model.add(same == 0)
-        same_time_cache[key] = same
-        return same
+        if _weeks_overlap(left.week_pattern, right.week_pattern):
+            shared_slots = set(left.available_slot_ids) & set(right.available_slot_ids)
+            for left_meeting in meetings_by_offering[left.id]:
+                for right_meeting in meetings_by_offering[right.id]:
+                    for slot_id in shared_slots:
+                        collision = model.new_bool_var(
+                            f"collision_{left_meeting}_{right_meeting}_{slot_id}"
+                        )
+                        left_var = variables[(left_meeting, slot_id)]
+                        right_var = variables[(right_meeting, slot_id)]
+                        model.add(collision <= left_var)
+                        model.add(collision <= right_var)
+                        model.add(collision >= left_var + right_var - 1)
+                        collisions.append(collision)
+        conflict = model.new_bool_var(f"section_conflict_{key[0]}_{key[1]}")
+        if collisions:
+            model.add_max_equality(conflict, collisions)
+        else:
+            model.add(conflict == 0)
+        section_conflict_cache[key] = conflict
+        return conflict
+
+    # برای هر دستهٔ منع تداخل، حل‌کننده یک گروه از هر درس انتخاب می‌کند که همگی با هم قابل اخذ باشند.
+    for conflict_group in request.conflict_groups:
+        selected: dict[tuple[str, str], cp_model.IntVar] = {}
+        present_courses = [
+            course_id
+            for course_id in dict.fromkeys(conflict_group.course_ids)
+            if course_id in offerings_by_course
+        ]
+        for course_id in present_courses:
+            selectors = []
+            for offering_id in offerings_by_course[course_id]:
+                selector = model.new_bool_var(
+                    f"path_{conflict_group.id}_{course_id}_{offering_id}"
+                )
+                selected[(course_id, offering_id)] = selector
+                selectors.append(selector)
+            model.add_exactly_one(selectors)
+        for left_course, right_course in combinations(present_courses, 2):
+            for left_id in offerings_by_course[left_course]:
+                for right_id in offerings_by_course[right_course]:
+                    model.add(sections_conflict(left_id, right_id) == 0).only_enforce_if(
+                        [
+                            selected[(left_course, left_id)],
+                            selected[(right_course, right_id)],
+                        ]
+                    )
 
     priority_ids, priority_semester = _interpreted_priority(request)
     demands = request.demand_groups or _default_demands(request.offerings)
-    penalties: list[cp_model.LinearExpr] = []
     demand_conflicts: list[tuple[DemandGroup, str, str, cp_model.IntVar, int]] = []
 
-    # هر جفت درس برای یک گروه تقاضا قابل اخذ است اگر حداقل یک جفت گروه غیرهم‌زمان وجود داشته باشد.
     for demand in demands:
-        available_courses = [course_id for course_id in demand.course_ids if course_id in offering_by_id]
+        available_courses = [
+            course_id for course_id in demand.course_ids if course_id in offerings_by_course
+        ]
         for left_course, right_course in combinations(available_courses, 2):
-            pair_same_vars = [
-                same_time(left_section, right_section)
-                for left_section in sections_by_course[left_course]
-                for right_section in sections_by_course[right_course]
+            pair_conflicts = [
+                sections_conflict(left_id, right_id)
+                for left_id in offerings_by_course[left_course]
+                for right_id in offerings_by_course[right_course]
             ]
             unavoidable = model.new_bool_var(
                 f"unavoidable_{demand.id}_{left_course}_{right_course}"
             )
-            model.add_bool_and(pair_same_vars).only_enforce_if(unavoidable)
-            model.add_bool_or([value.Not() for value in pair_same_vars]).only_enforce_if(
+            model.add_bool_and(pair_conflicts).only_enforce_if(unavoidable)
+            model.add_bool_or([value.Not() for value in pair_conflicts]).only_enforce_if(
                 unavoidable.Not()
             )
             pair_weight = demand.student_count * demand.weight
@@ -247,40 +284,45 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
                 (demand, left_course, right_course, unavoidable, pair_weight)
             )
 
-    # درخواست «آزادی بیشتر برای درس X در ترم Y» حتی بدون داده تاریخی اثر می‌گذارد.
     if priority_semester is not None:
-        target_courses = [
-            offering.id
+        target_courses = {
+            offering.course_id
             for offering in request.offerings
             if offering.preferred_semester == priority_semester
-        ]
+        }
         for priority_course in priority_ids:
+            if priority_course not in offerings_by_course:
+                continue
             for target_course in target_courses:
                 if priority_course == target_course:
                     continue
-                pair_same_vars = [
-                    same_time(left_section, right_section)
-                    for left_section in sections_by_course[priority_course]
-                    for right_section in sections_by_course[target_course]
+                pair_conflicts = [
+                    sections_conflict(left_id, right_id)
+                    for left_id in offerings_by_course[priority_course]
+                    for right_id in offerings_by_course[target_course]
                 ]
                 unavoidable = model.new_bool_var(
                     f"priority_{priority_course}_{target_course}"
                 )
-                model.add_bool_and(pair_same_vars).only_enforce_if(unavoidable)
+                model.add_bool_and(pair_conflicts).only_enforce_if(unavoidable)
                 model.add_bool_or(
-                    [value.Not() for value in pair_same_vars]
+                    [value.Not() for value in pair_conflicts]
                 ).only_enforce_if(unavoidable.Not())
                 penalties.append(request.priority.strength * 100 * unavoidable)
 
-    # ترجیح نرم: گروه‌های دروس یک ترم تا حد امکان روی هم نیفتند.
-    for left_id, right_id in combinations(offering_by_id, 2):
-        left = offering_by_id[left_id]
-        right = offering_by_id[right_id]
-        if left.preferred_semester != right.preferred_semester:
-            continue
-        for left_section in sections_by_course[left_id]:
-            for right_section in sections_by_course[right_id]:
-                penalties.append(2 * same_time(left_section, right_section))
+    # گروه‌های موازی یک درس ترجیحاً مسیرهای زمانی متفاوت ایجاد می‌کنند.
+    for offering_ids in offerings_by_course.values():
+        for left_id, right_id in combinations(offering_ids, 2):
+            penalties.append(5 * sections_conflict(left_id, right_id))
+
+    courses_by_semester: dict[int, set[str]] = defaultdict(set)
+    for offering in request.offerings:
+        courses_by_semester[offering.preferred_semester].add(offering.course_id)
+    for course_ids in courses_by_semester.values():
+        for left_course, right_course in combinations(sorted(course_ids), 2):
+            for left_id in offerings_by_course[left_course]:
+                for right_id in offerings_by_course[right_course]:
+                    penalties.append(2 * sections_conflict(left_id, right_id))
 
     model.minimize(sum(penalties) if penalties else 0)
     solver = cp_model.CpSolver()
@@ -290,29 +332,32 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return _infeasible_response(
             request.name,
-            "با زمان‌های آزاد، ظرفیت کلاس‌ها و تعداد گروه‌های فعلی برنامه شدنی نیست؛ یکی از این محدودیت‌ها را تغییر دهید.",
+            "با جلسات، الگوی هفته‌های زوج و فرد، ساعت استادها، کلاس‌ها و دسته‌های منع تداخل فعلی برنامه شدنی نیست؛ یکی از این محدودیت‌ها را تغییر دهید.",
         )
 
     assignments: list[ScheduleAssignment] = []
-    for section_id, offering, group_number in sections:
+    for meeting_id, offering, meeting_number in meetings:
         selected_slot = next(
             slot_by_id[slot_id]
             for slot_id in offering.available_slot_ids
-            if solver.value(variables[(section_id, slot_id)])
+            if solver.value(variables[(meeting_id, slot_id)])
         )
         selected_room = next(
             room_by_id[room.id]
             for room in compatible_rooms[offering.id]
-            if solver.value(placements[(section_id, selected_slot.id, room.id)])
+            if solver.value(placements[(meeting_id, selected_slot.id, room.id)])
         )
         assignments.append(
             ScheduleAssignment(
-                section_id=section_id,
+                section_id=meeting_id,
                 offering_id=offering.id,
+                course_id=offering.course_id,
                 code=offering.code,
                 course_title=offering.title,
                 instructor=offering.instructor,
-                group_number=group_number,
+                group_number=offering.group_number,
+                meeting_number=meeting_number,
+                week_pattern=offering.week_pattern,
                 capacity=offering.capacity,
                 semester=offering.preferred_semester,
                 kind=offering.kind,
@@ -332,18 +377,26 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         if total_weight
         else 100
     )
+    course_titles = {
+        course_id: offering_by_id[offering_ids[0]].title
+        for course_id, offering_ids in offerings_by_course.items()
+    }
     demand_by_course = {
-        offering.id: sum(
+        course_id: sum(
             demand.student_count
             for demand in demands
-            if offering.id in demand.course_ids
+            if course_id in demand.course_ids
         )
-        for offering in request.offerings
+        for course_id in offerings_by_course
+    }
+    capacity_by_course = {
+        course_id: sum(offering_by_id[item_id].capacity for item_id in offering_ids)
+        for course_id, offering_ids in offerings_by_course.items()
     }
     total_requested_seats = sum(demand_by_course.values())
     covered_seats = sum(
-        min(demand_by_course[offering.id], offering.groups * offering.capacity)
-        for offering in request.offerings
+        min(demand_by_course[course_id], capacity_by_course[course_id])
+        for course_id in offerings_by_course
     )
     capacity_coverage = (
         round(100 * covered_seats / total_requested_seats)
@@ -356,37 +409,49 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
     for demand, left_id, right_id, conflict_var, _ in demand_conflicts:
         if solver.value(conflict_var):
             unresolved.append(
-                f"برای «{demand.label}»، {offering_by_id[left_id].title} با {offering_by_id[right_id].title} مسیر بدون تداخل ندارد."
+                f"برای «{demand.label}»، {course_titles[left_id]} با {course_titles[right_id]} مسیر بدون تداخل ندارد."
             )
-    for offering in request.offerings:
-        demand_count = demand_by_course[offering.id]
-        available_capacity = offering.groups * offering.capacity
+    for course_id, demand_count in demand_by_course.items():
+        available_capacity = capacity_by_course[course_id]
         if demand_count > available_capacity:
-            suggested_groups = (demand_count + offering.capacity - 1) // offering.capacity
+            max_capacity = max(
+                offering_by_id[item_id].capacity
+                for item_id in offerings_by_course[course_id]
+            )
+            suggested_groups = (demand_count + max_capacity - 1) // max_capacity
             unresolved.append(
-                f"«{offering.title}» حدود {demand_count} متقاضی و {available_capacity} صندلی دارد؛ حداقل {suggested_groups} گروه پیشنهاد می‌شود."
+                f"«{course_titles[course_id]}» حدود {demand_count} متقاضی و {available_capacity} صندلی دارد؛ حداقل {suggested_groups} گروه پیشنهاد می‌شود."
             )
 
-    priority_titles = [
-        offering.title for offering in request.offerings if offering.id in priority_ids
-    ]
+    priority_titles = sorted(
+        {course_titles[course_id] for course_id in priority_ids if course_id in course_titles}
+    )
     historical_count = sum(1 for demand in demands if demand.source == "historical")
     demand_basis = (
-        f"{len(demands)} گروه تقاضا؛ {historical_count} گروه مبتنی بر سابقه واقعی"
+        f"{len(demands)} گروه تقاضا؛ {historical_count} گروه مبتنی بر سابقه واقعی؛ {len(request.conflict_groups)} دسته منع تداخل قطعی"
         if historical_count
-        else f"{len(demands)} سناریوی تقاضای برآوردی؛ هنوز بدون آمار واقعی دانشگاه"
+        else f"{len(demands)} سناریوی تقاضای برآوردی؛ {len(request.conflict_groups)} دسته منع تداخل قطعی؛ هنوز بدون آمار واقعی دانشگاه"
+    )
+    rotating_count = sum(
+        1 for offering in request.offerings if offering.week_pattern != "every"
     )
     insights = [
-        f"برای {len(assignments)} گروه درسی زمان قابل اجرا پیدا شد.",
+        f"برای {len(request.offerings)} گروه درسی، {len(assignments)} جلسه قابل اجرا پیدا شد.",
         f"پوشش زمانی جفت‌درس‌ها {conflict_coverage}٪ و پوشش ظرفیت صندلی‌ها {capacity_coverage}٪ محاسبه شد.",
-        "گروه‌های موازی هر درس در زمان‌های متفاوت قرار گرفتند تا مسیر جایگزین ایجاد شود.",
+        f"برای {len(request.conflict_groups)} دسته، یک مسیر کامل بدون تداخل میان همه درس‌های دسته تضمین شد.",
     ]
+    if rotating_count:
+        insights.append(
+            f"{rotating_count} گروه چرخشی زوج/فرد با تفکیک واقعی هفته‌ها زمان‌بندی شد."
+        )
     if priority_titles:
         insights.append(
             f"درخواست فارسی برای «{'، '.join(priority_titles)}» به اولویت حل‌کننده تبدیل شد."
         )
     if priority_semester:
-        insights.append(f"دروس ترم {priority_semester} در آزادی انتخاب وزن بیشتری گرفتند.")
+        insights.append(
+            f"دروس ترم {priority_semester} در آزادی انتخاب وزن بیشتری گرفتند."
+        )
 
     response_payload = {
         "name": request.name,
@@ -406,9 +471,9 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         assignments=assignments,
         metrics=[
             Metric(label="کیفیت چینش", value=f"{score}٪", change="براساس محدودیت و تقاضا", tone="lavender"),
-            Metric(label="پوشش انتخاب", value=f"{coverage}٪", change="برآورد جفت‌درس‌های قابل اخذ", tone="mint"),
-            Metric(label="گروه‌های چیده‌شده", value=str(len(assignments)), change="بدون تداخل استاد", tone="blue"),
-            Metric(label="تداخل حل‌نشده", value=str(len(unresolved)), change="استاد، کلاس و تقاضا", tone="peach"),
+            Metric(label="پوشش انتخاب", value=f"{coverage}٪", change="برآورد مسیرهای قابل اخذ", tone="mint"),
+            Metric(label="جلسات چیده‌شده", value=str(len(assignments)), change=f"برای {len(request.offerings)} گروه درسی", tone="blue"),
+            Metric(label="موارد قابل بهبود", value=str(len(unresolved)), change="ظرفیت و تقاضای نرم", tone="peach"),
         ],
         insights=insights,
         unresolved=unresolved,

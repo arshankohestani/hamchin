@@ -15,11 +15,14 @@ export type Room = {
 
 export type Offering = {
   id: string;
+  course_id: string;
   code: string;
   title: string;
   instructor: string;
   preferred_semester: number;
-  groups: number;
+  group_number: number;
+  weekly_sessions: number;
+  week_pattern: "every" | "odd" | "even";
   capacity: number;
   available_slot_ids: string[];
   flexibility: number;
@@ -36,13 +39,23 @@ export type DemandGroup = {
   source: "estimated" | "historical" | "requested";
 };
 
+export type ConflictGroup = {
+  id: string;
+  label: string;
+  entry_year: string;
+  course_ids: string[];
+};
+
 export type Assignment = {
   section_id: string;
   offering_id: string;
+  course_id: string;
   code: string;
   course_title: string;
   instructor: string;
   group_number: number;
+  meeting_number: number;
+  week_pattern: "every" | "odd" | "even";
   capacity: number;
   semester: number;
   kind: string;
@@ -73,6 +86,7 @@ export type DemoData = {
   rooms: Room[];
   offerings: Offering[];
   demand_groups: DemandGroup[];
+  conflict_groups: ConflictGroup[];
   revisions: Array<{ id: number; name: string; status: string; score: number; created_at: string }>;
 };
 

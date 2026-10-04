@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, UsersRound } from "lucide-react";
 import type { DemandGroup, Offering } from "@/lib/types";
 
@@ -12,6 +12,13 @@ type Props = {
 
 export function DemandEditor({ groups, offerings, onChange }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const courses = useMemo(() => {
+    const unique = new Map<string, Offering>();
+    offerings.filter((item) => item.enabled !== false).forEach((item) => {
+      if (!unique.has(item.course_id)) unique.set(item.course_id, item);
+    });
+    return [...unique.values()];
+  }, [offerings]);
 
   function update(id: string, patch: Partial<DemandGroup>) {
     onChange(groups.map((group) => (group.id === id ? { ...group, ...patch } : group)));
@@ -26,7 +33,7 @@ export function DemandEditor({ groups, offerings, onChange }: Props) {
   }
 
   function addGroup() {
-    const initialCourses = offerings.filter((item) => item.enabled !== false).slice(0, 2).map((item) => item.id);
+    const initialCourses = courses.slice(0, 2).map((item) => item.course_id);
     if (initialCourses.length < 2) return;
     onChange([
       ...groups,
@@ -67,8 +74,8 @@ export function DemandEditor({ groups, offerings, onChange }: Props) {
                 <button className="remove-room" type="button" onClick={() => onChange(groups.filter((item) => item.id !== group.id))} aria-label={`حذف ${group.label}`}><Trash2 size={14} /></button>
               </div>
               <div className="demand-courses">
-                {offerings.filter((item) => item.enabled !== false).map((offering) => (
-                  <button type="button" className={group.course_ids.includes(offering.id) ? "active" : ""} key={offering.id} onClick={() => toggleCourse(group, offering.id)}>{offering.title}</button>
+                {courses.map((offering) => (
+                  <button type="button" className={group.course_ids.includes(offering.course_id) ? "active" : ""} key={offering.course_id} onClick={() => toggleCourse(group, offering.course_id)}>{offering.title}</button>
                 ))}
               </div>
             </article>

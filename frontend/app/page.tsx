@@ -16,15 +16,17 @@ import { Sidebar } from "@/components/Sidebar";
 import { OfferingEditor } from "@/components/OfferingEditor";
 import { RoomEditor } from "@/components/RoomEditor";
 import { DemandEditor } from "@/components/DemandEditor";
+import { ConflictGroupEditor } from "@/components/ConflictGroupEditor";
 import { ScheduleView } from "@/components/ScheduleView";
 import { approveSchedule, generateSchedule, loadDemo } from "@/lib/api";
-import type { DemandGroup, Offering, Room, ScheduleResult, Slot } from "@/lib/types";
+import type { ConflictGroup, DemandGroup, Offering, Room, ScheduleResult, Slot } from "@/lib/types";
 
 export default function Home() {
   const [offerings, setOfferings] = useState<Offering[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [demandGroups, setDemandGroups] = useState<DemandGroup[]>([]);
+  const [conflictGroups, setConflictGroups] = useState<ConflictGroup[]>([]);
   const [priorityIds, setPriorityIds] = useState<string[]>(["diff", "soft"]);
   const [targetSemester, setTargetSemester] = useState<number>(7);
   const [instruction, setInstruction] = useState("آزادی انتخاب معادلات و مهارت‌های نرم برای دانشجویان ترم‌های بالاتر بیشتر شود.");
@@ -40,7 +42,7 @@ export default function Home() {
       .then((data) => {
         let restored: Offering[] | null = null;
         try {
-          const saved = window.localStorage.getItem("hamchin-offerings-draft");
+          const saved = window.localStorage.getItem("hamchin-offerings-v2");
           const parsed: unknown = saved ? JSON.parse(saved) : null;
           if (Array.isArray(parsed) && parsed.length > 0) restored = parsed as Offering[];
         } catch {
@@ -55,9 +57,13 @@ export default function Home() {
           const savedDemands = window.localStorage.getItem("hamchin-demands-draft");
           const parsedDemands: unknown = savedDemands ? JSON.parse(savedDemands) : null;
           setDemandGroups(Array.isArray(parsedDemands) ? parsedDemands as DemandGroup[] : data.demand_groups);
+          const savedConflicts = window.localStorage.getItem("hamchin-conflict-groups-v2");
+          const parsedConflicts: unknown = savedConflicts ? JSON.parse(savedConflicts) : null;
+          setConflictGroups(Array.isArray(parsedConflicts) ? parsedConflicts as ConflictGroup[] : data.conflict_groups);
         } catch {
           setRooms(data.rooms);
           setDemandGroups(data.demand_groups);
+          setConflictGroups(data.conflict_groups);
         }
         try {
           const savedResult = window.localStorage.getItem("hamchin-latest-schedule");
@@ -74,7 +80,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading && offerings.length > 0) {
-      window.localStorage.setItem("hamchin-offerings-draft", JSON.stringify(offerings));
+      window.localStorage.setItem("hamchin-offerings-v2", JSON.stringify(offerings));
     }
   }, [loading, offerings]);
 
@@ -82,11 +88,20 @@ export default function Home() {
     if (!loading && rooms.length > 0) {
       window.localStorage.setItem("hamchin-rooms-draft", JSON.stringify(rooms));
       window.localStorage.setItem("hamchin-demands-draft", JSON.stringify(demandGroups));
+      window.localStorage.setItem("hamchin-conflict-groups-v2", JSON.stringify(conflictGroups));
     }
-  }, [loading, rooms, demandGroups]);
+  }, [loading, rooms, demandGroups, conflictGroups]);
 
   const activeOfferings = useMemo(() => offerings.filter((item) => item.enabled !== false), [offerings]);
-  const totalGroups = activeOfferings.reduce((sum, item) => sum + item.groups, 0);
+  const activeCourses = useMemo(() => {
+    const unique = new Map<string, Offering>();
+    activeOfferings.forEach((item) => {
+      if (!unique.has(item.course_id)) unique.set(item.course_id, item);
+    });
+    return [...unique.values()];
+  }, [activeOfferings]);
+  const totalGroups = activeOfferings.length;
+  const totalMeetings = activeOfferings.reduce((sum, item) => sum + item.weekly_sessions, 0);
 
   async function handleGenerate() {
     if (!activeOfferings.length) {
@@ -104,7 +119,12 @@ export default function Home() {
         rooms,
         demand_groups: demandGroups.filter((group) =>
           group.course_ids.every((courseId) =>
-            activeOfferings.some((offering) => offering.id === courseId),
+            activeOfferings.some((offering) => offering.course_id === courseId),
+          ),
+        ),
+        conflict_groups: conflictGroups.filter((group) =>
+          group.course_ids.every((courseId) =>
+            activeOfferings.some((offering) => offering.course_id === courseId),
           ),
         ),
         priority: { course_ids: priorityIds, semester: targetSemester, strength: 4, note: instruction },
@@ -169,7 +189,7 @@ export default function Home() {
           </section>
 
           <div className="progress-strip">
-            <div className="progress-item done"><span>۱</span><div><strong>تعریف ارائه‌ها</strong><small>{activeOfferings.length} درس، {totalGroups} گروه</small></div></div>
+            <div className="progress-item done"><span>۱</span><div><strong>تعریف ارائه‌ها</strong><small>{activeCourses.length} درس، {totalGroups} گروه، {totalMeetings} جلسه</small></div></div>
             <div className="progress-line active" />
             <div className="progress-item current"><span>۲</span><div><strong>اولویت‌های هوشمند</strong><small>تنظیم آزادی انتخاب</small></div></div>
             <div className="progress-line" />
@@ -184,6 +204,7 @@ export default function Home() {
             <div className="workspace-grid">
               <div className="editor-column">
                 <OfferingEditor offerings={offerings} slots={slots} onChange={setOfferings} />
+                <ConflictGroupEditor groups={conflictGroups} offerings={offerings} onChange={setConflictGroups} />
                 <RoomEditor rooms={rooms} onChange={setRooms} />
                 <DemandEditor groups={demandGroups} offerings={offerings} onChange={setDemandGroups} />
               </div>
@@ -202,9 +223,9 @@ export default function Home() {
 
                 <label className="field-label">درس‌های با اولویت بیشتر</label>
                 <div className="priority-chips">
-                  {activeOfferings.map((item) => {
-                    const selected = priorityIds.includes(item.id);
-                    return <button key={item.id} className={selected ? "active" : ""} type="button" onClick={() => setPriorityIds(selected ? priorityIds.filter((id) => id !== item.id) : [...priorityIds, item.id])}>{item.title}</button>;
+                  {activeCourses.map((item) => {
+                    const selected = priorityIds.includes(item.course_id);
+                    return <button key={item.course_id} className={selected ? "active" : ""} type="button" onClick={() => setPriorityIds(selected ? priorityIds.filter((id) => id !== item.course_id) : [...priorityIds, item.course_id])}>{item.title}</button>;
                   })}
                 </div>
 
@@ -217,9 +238,9 @@ export default function Home() {
                 <textarea id="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={4} />
 
                 <div className="assistant-summary">
-                  <div><span>درس فعال</span><strong>{activeOfferings.length}</strong></div>
+                  <div><span>درس فعال</span><strong>{activeCourses.length}</strong></div>
                   <div><span>گروه درسی</span><strong>{totalGroups}</strong></div>
-                  <div><span>اولویت ویژه</span><strong>{priorityIds.length}</strong></div>
+                  <div><span>جلسه هفتگی</span><strong>{totalMeetings}</strong></div>
                 </div>
 
                 <button className="generate-button" type="button" onClick={handleGenerate} disabled={generating}>
