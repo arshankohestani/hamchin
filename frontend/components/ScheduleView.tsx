@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarCheck2, CheckCircle2, CircleAlert, MapPin, Sparkles } from "lucide-react";
+import { CalendarCheck2, CheckCircle2, CircleAlert, MapPin, Sparkles, Star } from "lucide-react";
 import type { ScheduleResult, Slot } from "@/lib/types";
 
 const weekLabels = { every: "هر هفته", odd: "هفته فرد", even: "هفته زوج" } as const;
@@ -12,11 +12,28 @@ type Props = {
   approving: boolean;
   approved: boolean;
   onApprove: () => void;
+  onFeedback: (rating: number) => Promise<unknown>;
 };
 
-export function ScheduleView({ result, slots, approving, approved, onApprove }: Props) {
+export function ScheduleView({ result, slots, approving, approved, onApprove, onFeedback }: Props) {
   const [selectedId, setSelectedId] = useState("semester-1");
-  useEffect(() => setSelectedId("semester-1"), [result.revision_id]);
+  const [feedback, setFeedback] = useState(0);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  useEffect(() => { setSelectedId("semester-1"); setFeedback(0); setFeedbackError(""); }, [result.revision_id]);
+
+  async function submitFeedback(rating: number) {
+    setFeedbackBusy(true);
+    setFeedbackError("");
+    try {
+      await onFeedback(rating);
+      setFeedback(rating);
+    } catch {
+      setFeedbackError("ثبت امتیاز نیازمند اتصال پایگاه‌داده است.");
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
 
   const programs = result.schedule_programs?.length
     ? result.schedule_programs
@@ -109,6 +126,19 @@ export function ScheduleView({ result, slots, approving, approved, onApprove }: 
           <div className="panel score-ring-card">
             <div className="score-ring" style={{ "--score": `${result.score * 3.6}deg` } as React.CSSProperties}><div><strong>{result.score}</strong><span>از ۱۰۰</span></div></div>
             <div><h3>امتیاز کیفیت</h3><p>این امتیاز با تداخل‌ها و آزادی انتخاب محاسبه شده است.</p></div>
+          </div>
+          <div className="panel feedback-card">
+            <h3>این چینش چقدر مناسب است؟</h3>
+            <p>امتیاز شما به یادگیری سلیقه مدیرگروه کمک می‌کند.</p>
+            <div>
+              {[1, 2, 3, 4, 5].map((rating) => (
+                <button key={rating} type="button" disabled={feedbackBusy} className={rating <= feedback ? "active" : ""} onClick={() => void submitFeedback(rating)} aria-label={`${rating} ستاره`}>
+                  <Star size={16} fill={rating <= feedback ? "currentColor" : "none"} />
+                </button>
+              ))}
+            </div>
+            {feedback > 0 && <small>امتیاز ثبت شد و در چینش‌های بعدی اثر می‌گذارد.</small>}
+            {feedbackError && <small className="feedback-error">{feedbackError}</small>}
           </div>
         </aside>
       </div>

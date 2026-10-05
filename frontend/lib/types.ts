@@ -105,3 +105,19 @@ export type DemoData = {
   revisions: Array<{ id: number; name: string; status: string; score: number; created_at: string }>;
 };
 
+export type IntelligenceStatus = {
+  solver: string;
+  persian_understanding: string;
+  database: string;
+  demand_forecasting: string;
+  preference_learning: string;
+};
+
+export type InterpretResult = {
+  course_ids: string[];
+  semester: number | null;
+  strength: number;
+  interpreted_text: string;
+  provider: "gemini" | "heuristic";
+};
+

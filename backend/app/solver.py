@@ -129,6 +129,7 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
     variables: dict[tuple[str, str], cp_model.IntVar] = {}
     placements: dict[tuple[str, str, str], cp_model.IntVar] = {}
     penalties: list[cp_model.LinearExpr] = []
+    best_learned_score = max(request.learned_slot_preferences.values(), default=0)
 
     for offering in request.offerings:
         for session in offering.sessions:
@@ -158,6 +159,9 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
                     meeting_placements.append(placement)
                     if offering.kind != "lab" and room.kind == "lab":
                         penalties.append(3 * placement)
+                    if best_learned_score:
+                        learned_score = request.learned_slot_preferences.get(slot_id, 0)
+                        penalties.append((best_learned_score - learned_score) * placement)
                 model.add(variables[(meeting_id, slot_id)] == sum(slot_placements))
             model.add_exactly_one(meeting_placements)
 
@@ -459,11 +463,15 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         )
     if priority_titles:
         insights.append(
-            f"درخواست فارسی برای «{'، '.join(priority_titles)}» به اولویت حل‌کننده تبدیل شد."
+            f"درخواست فارسی برای «{'، '.join(priority_titles)}» با {('Gemini' if request.priority.interpretation_source == 'gemini' else 'تحلیل داخلی')} به اولویت حل‌کننده تبدیل شد."
         )
     if priority_semester:
         insights.append(
             f"دروس ترم {priority_semester} در آزادی انتخاب وزن بیشتری گرفتند."
+        )
+    if request.learned_slot_preferences:
+        insights.append(
+            f"ترجیحات آموخته‌شده مدیرگروه برای {len(request.learned_slot_preferences)} بازه زمانی در تابع هدف اعمال شد."
         )
 
     schedule_programs = [

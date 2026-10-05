@@ -74,6 +74,28 @@ def test_health() -> None:
         assert response.json()["status"] == "ok"
 
 
+def test_intelligence_status_and_persian_interpretation(monkeypatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with TestClient(app) as client:
+        status = client.get("/api/intelligence/status")
+        assert status.status_code == 200
+        assert "OR-Tools" in status.json()["solver"]
+        response = client.post(
+            "/api/ai/interpret",
+            json={
+                "note": "آزادی معادلات دیفرانسیل برای ترم ۵ بیشتر شود",
+                "courses": [
+                    {"course_id": "diff", "code": "SCI-103", "title": "معادلات دیفرانسیل"},
+                    {"course_id": "ai", "code": "CSE-116", "title": "هوش مصنوعی"},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["provider"] == "heuristic"
+        assert response.json()["semester"] == 5
+        assert "diff" in response.json()["course_ids"]
+
+
 def test_generate_demo_schedule() -> None:
     with TestClient(app) as client:
         response = client.post("/api/schedules/generate", json=demo_payload())
@@ -140,6 +162,23 @@ def test_generate_demo_schedule() -> None:
                 )
                 for path in product(*choices)
             )
+
+
+def test_feedback_is_saved_for_preference_learning() -> None:
+    payload = demo_payload()
+    payload["offerings"] = payload["offerings"][:1]
+    payload["demand_groups"] = []
+    payload["conflict_groups"] = []
+    with TestClient(app) as client:
+        generated = client.post("/api/schedules/generate", json=payload)
+        assert generated.status_code == 200, generated.text
+        revision_id = generated.json()["revision_id"]
+        feedback = client.post(
+            f"/api/schedules/{revision_id}/feedback",
+            json={"rating": 4, "comment": "چینش مناسب"},
+        )
+        assert feedback.status_code == 200
+        assert feedback.json()["status"] == "learned"
 
 
 def test_reject_unknown_slot() -> None:

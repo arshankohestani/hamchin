@@ -78,6 +78,17 @@ Name: FRONTEND_ORIGINS
 Value: https://hamchin-app.vercel.app
 ```
 
+برای فعال‌شدن پایگاه‌داده و فهم فارسی هوشمند، این متغیرها را نیز در همان پروژه بک‌اند وارد کنید:
+
+```text
+DATABASE_URL=آدرس pooled connection دیتابیس Neon همراه sslmode=require
+GEMINI_API_KEY=کلید رایگان Google AI Studio
+GEMINI_MODEL=gemini-2.5-flash-lite
+ML_TARGET_TERM=1405-1
+```
+
+مقدار `DATABASE_URL` را از صفحه Connect پروژه Neon بردارید و حتماً آدرس pooled را انتخاب کنید. کلید Gemini فقط باید در بک‌اند قرار بگیرد و نباید در متغیرهای فرانت‌اند یا کد GitHub نوشته شود.
+
 4. به تب Deployments برگردید و آخرین Deployment بک‌اند را Redeploy کنید.
 
 ## ۵. آزمون نهایی

@@ -68,13 +68,14 @@ class PriorityRequest(BaseModel):
     semester: int | None = Field(default=None, ge=1, le=8)
     strength: int = Field(default=3, ge=1, le=5)
     note: str = ""
+    interpretation_source: Literal["heuristic", "gemini", "manual"] = "manual"
 
 
 class DemandGroup(BaseModel):
     id: str
     label: str
     student_count: int = Field(ge=1, le=10_000)
-    course_ids: list[str] = Field(min_length=2)
+    course_ids: list[str] = Field(min_length=1)
     weight: int = Field(default=1, ge=1, le=10)
     source: Literal["estimated", "historical", "requested"] = "estimated"
 
@@ -95,6 +96,7 @@ class GenerateScheduleRequest(BaseModel):
     demand_groups: list[DemandGroup] = Field(default_factory=list)
     conflict_groups: list[ConflictGroup] = Field(default_factory=list)
     locked_assignments: dict[str, str] = Field(default_factory=dict)
+    learned_slot_preferences: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_references(self) -> "GenerateScheduleRequest":
@@ -216,3 +218,46 @@ class GenerateScheduleResponse(BaseModel):
     metrics: list[Metric]
     insights: list[str]
     unresolved: list[str]
+
+
+class CourseSummary(BaseModel):
+    course_id: str
+    code: str
+    title: str
+
+
+class InterpretRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=2_000)
+    courses: list[CourseSummary]
+
+
+class InterpretResponse(BaseModel):
+    course_ids: list[str]
+    semester: int | None = Field(default=None, ge=1, le=8)
+    strength: int = Field(default=3, ge=1, le=5)
+    interpreted_text: str
+    provider: Literal["gemini", "heuristic"]
+
+
+class DemandHistoryItem(BaseModel):
+    academic_term: str = Field(min_length=1, max_length=30)
+    course_id: str = Field(min_length=1, max_length=120)
+    enrolled_count: int = Field(ge=0, le=100_000)
+    capacity: int = Field(default=0, ge=0, le=100_000)
+
+
+class DemandHistoryRequest(BaseModel):
+    records: list[DemandHistoryItem] = Field(min_length=1, max_length=10_000)
+
+
+class ScheduleFeedbackRequest(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=1_000)
+
+
+class IntelligenceStatus(BaseModel):
+    solver: str
+    persian_understanding: str
+    database: str
+    demand_forecasting: str
+    preference_learning: str

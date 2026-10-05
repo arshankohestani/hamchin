@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bell,
+  BrainCircuit,
   ChevronDown,
   LoaderCircle,
   MessageSquareText,
@@ -19,8 +20,9 @@ import { DemandEditor } from "@/components/DemandEditor";
 import { ConflictGroupEditor } from "@/components/ConflictGroupEditor";
 import { ScheduleView } from "@/components/ScheduleView";
 import { ExcelImporter } from "@/components/ExcelImporter";
-import { approveSchedule, generateSchedule, loadDemo } from "@/lib/api";
-import type { ConflictGroup, DemandGroup, Offering, Room, ScheduleResult, Slot } from "@/lib/types";
+import { DemandHistoryImporter } from "@/components/DemandHistoryImporter";
+import { approveSchedule, generateSchedule, interpretRequest, loadDemo, loadIntelligenceStatus, sendScheduleFeedback } from "@/lib/api";
+import type { ConflictGroup, DemandGroup, IntelligenceStatus, Offering, Room, ScheduleResult, Slot } from "@/lib/types";
 
 export default function Home() {
   const [offerings, setOfferings] = useState<Offering[]>([]);
@@ -36,9 +38,13 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approved, setApproved] = useState(false);
+  const [intelligence, setIntelligence] = useState<IntelligenceStatus | null>(null);
+  const [interpreting, setInterpreting] = useState(false);
+  const [interpretation, setInterpretation] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
+    loadIntelligenceStatus().then(setIntelligence).catch(() => setIntelligence(null));
     loadDemo()
       .then((data) => {
         let restored: Offering[] | null = null;
@@ -115,6 +121,22 @@ export default function Home() {
     setError("");
   }
 
+  async function handleInterpret() {
+    if (!instruction.trim()) return;
+    setInterpreting(true);
+    setError("");
+    try {
+      const parsed = await interpretRequest(instruction, activeOfferings);
+      setPriorityIds((current) => [...new Set([...current, ...parsed.course_ids])]);
+      if (parsed.semester) setTargetSemester(parsed.semester);
+      setInterpretation(`${parsed.provider === "gemini" ? "Gemini" : "تحلیل داخلی"}: ${parsed.interpreted_text}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "تحلیل درخواست انجام نشد.");
+    } finally {
+      setInterpreting(false);
+    }
+  }
+
   async function handleGenerate() {
     if (!activeOfferings.length) {
       setError("حداقل یک درس را برای ارائه فعال کنید.");
@@ -142,6 +164,7 @@ export default function Home() {
         priority: { course_ids: priorityIds, semester: targetSemester, strength: 4, note: instruction },
       });
       setResult(schedule);
+      loadIntelligenceStatus().then(setIntelligence).catch(() => undefined);
       window.localStorage.setItem("hamchin-latest-schedule-v2", JSON.stringify(schedule));
       window.localStorage.setItem("hamchin-approved", "false");
       window.setTimeout(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }), 100);
@@ -219,6 +242,7 @@ export default function Home() {
                 <OfferingEditor offerings={offerings} slots={slots} onChange={setOfferings} />
                 <ConflictGroupEditor groups={conflictGroups} offerings={offerings} onChange={setConflictGroups} />
                 <RoomEditor rooms={rooms} onChange={setRooms} />
+                <DemandHistoryImporter offerings={offerings} onSaved={() => loadIntelligenceStatus().then(setIntelligence).catch(() => undefined)} />
                 <DemandEditor groups={demandGroups} offerings={offerings} onChange={setDemandGroups} />
               </div>
 
@@ -233,6 +257,17 @@ export default function Home() {
                   <MessageSquareText size={17} />
                   <p>می‌توانید بگویید «آزادی انتخاب این درس برای ترم ۷ بیشتر شود» یا درس‌ها را مستقیماً انتخاب کنید.</p>
                 </div>
+
+                {intelligence && (
+                  <div className="intelligence-status">
+                    <strong><BrainCircuit size={14} /> وضعیت موتورهای هوشمند</strong>
+                    <span>{intelligence.solver}</span>
+                    <span>{intelligence.persian_understanding}</span>
+                    <span>{intelligence.database}</span>
+                    <span>{intelligence.demand_forecasting}</span>
+                    <span>{intelligence.preference_learning}</span>
+                  </div>
+                )}
 
                 <label className="field-label">درس‌های با اولویت بیشتر</label>
                 <div className="priority-chips">
@@ -250,6 +285,10 @@ export default function Home() {
 
                 <label className="field-label" htmlFor="instruction">درخواست مدیرگروه</label>
                 <textarea id="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={4} />
+                <button className="interpret-button" type="button" onClick={handleInterpret} disabled={interpreting || !instruction.trim()}>
+                  <BrainCircuit size={15} /> {interpreting ? "در حال فهم درخواست…" : "تحلیل درخواست فارسی"}
+                </button>
+                {interpretation && <p className="interpretation-result">{interpretation}</p>}
 
                 <div className="assistant-summary">
                   <div><span>درس فعال</span><strong>{activeCourses.length}</strong></div>
@@ -266,7 +305,7 @@ export default function Home() {
             </div>
           )}
 
-          {result && <div id="result"><ScheduleView result={result} slots={slots} approving={approving} approved={approved} onApprove={handleApprove} /></div>}
+          {result && <div id="result"><ScheduleView result={result} slots={slots} approving={approving} approved={approved} onApprove={handleApprove} onFeedback={(rating) => sendScheduleFeedback(result.revision_id, rating)} /></div>}
         </div>
       </main>
     </div>

@@ -1,4 +1,4 @@
-import type { ConflictGroup, DemandGroup, DemoData, Offering, Room, ScheduleResult, Slot } from "./types";
+import type { ConflictGroup, DemandGroup, DemoData, IntelligenceStatus, InterpretResult, Offering, Room, ScheduleResult, Slot } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -24,6 +24,22 @@ export function loadDemo(): Promise<DemoData> {
   return request<DemoData>("/api/demo");
 }
 
+export function loadIntelligenceStatus(): Promise<IntelligenceStatus> {
+  return request<IntelligenceStatus>("/api/intelligence/status");
+}
+
+export function interpretRequest(note: string, offerings: Offering[]): Promise<InterpretResult> {
+  const courses = [...new Map(offerings.map((item) => [item.course_id, {
+    course_id: item.course_id,
+    code: item.code,
+    title: item.title,
+  }])).values()];
+  return request<InterpretResult>("/api/ai/interpret", {
+    method: "POST",
+    body: JSON.stringify({ note, courses }),
+  });
+}
+
 export function generateSchedule(input: {
   name: string;
   offerings: Offering[];
@@ -41,4 +57,18 @@ export function generateSchedule(input: {
 
 export function approveSchedule(revisionId: number): Promise<{ revision_id: number; status: string }> {
   return request(`/api/schedules/${revisionId}/approve`, { method: "POST" });
+}
+
+export function sendScheduleFeedback(revisionId: number, rating: number, comment = ""): Promise<{ status: string }> {
+  return request(`/api/schedules/${revisionId}/feedback`, {
+    method: "POST",
+    body: JSON.stringify({ rating, comment }),
+  });
+}
+
+export function saveDemandHistory(records: Array<{ academic_term: string; course_id: string; enrolled_count: number; capacity: number }>): Promise<{ saved: number }> {
+  return request("/api/demand/history", {
+    method: "POST",
+    body: JSON.stringify({ records }),
+  });
 }
