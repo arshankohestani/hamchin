@@ -70,6 +70,13 @@ export type Assignment = {
   room: string | null;
 };
 
+export type ScheduleProgram = {
+  id: string;
+  label: string;
+  semester: number | null;
+  assignments: Assignment[];
+};
+
 export type ScheduleResult = {
   revision_id: number;
   name: string;
@@ -78,6 +85,7 @@ export type ScheduleResult = {
   coverage_percent: number;
   demand_basis: string;
   assignments: Assignment[];
+  schedule_programs: ScheduleProgram[];
   metrics: Array<{
     label: string;
     value: string;

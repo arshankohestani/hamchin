@@ -40,9 +40,20 @@ def sections_overlap(left: list[dict], right: list[dict]) -> bool:
 
 
 def demo_payload() -> dict:
+    all_slot_ids = [item.id for item in SLOTS]
     return {
         "name": "تست خودکار",
-        "offerings": [item.model_dump() for item in OFFERINGS],
+        "offerings": [
+            {
+                **item.model_dump(),
+                "available_slot_ids": all_slot_ids,
+                "sessions": [
+                    {**session.model_dump(), "fixed_slot_id": None}
+                    for session in item.sessions
+                ],
+            }
+            for item in OFFERINGS
+        ],
         "slots": [item.model_dump() for item in SLOTS],
         "rooms": [item.model_dump() for item in ROOMS],
         "demand_groups": [item.model_dump() for item in DEMAND_GROUPS],
@@ -75,6 +86,14 @@ def test_generate_demo_schedule() -> None:
         assert "دسته منع تداخل قطعی" in data["demand_basis"]
         assert any("درخواست فارسی" in insight for insight in data["insights"])
         assert all(assignment["room"] for assignment in data["assignments"])
+        assert len(data["schedule_programs"]) == 9
+        assert [item["id"] for item in data["schedule_programs"]] == [
+            *(f"semester-{semester}" for semester in range(1, 9)),
+            "overall",
+        ]
+        assert data["schedule_programs"][-1]["assignments"] == data["assignments"]
+        for semester, program in enumerate(data["schedule_programs"][:8], start=1):
+            assert all(item["semester"] == semester for item in program["assignments"])
 
         instructor_uses: set[tuple[str, str, str]] = set()
         room_uses: set[tuple[str, str, str]] = set()
@@ -171,7 +190,12 @@ def test_report_infeasible_instructor_schedule() -> None:
 
 def test_report_missing_compatible_room() -> None:
     large = OFFERINGS[0].model_copy(
-        update={"weekly_sessions": 1, "sessions": one_session(), "capacity": 300}
+        update={
+            "weekly_sessions": 1,
+            "sessions": one_session(),
+            "capacity": 300,
+            "available_slot_ids": ["sat-08"],
+        }
     )
     payload = {
         "name": "کلاس ناکافی",

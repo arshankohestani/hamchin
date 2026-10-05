@@ -71,7 +71,7 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
       week_pattern: "every",
       sessions: [{ meeting_number: 1, week_pattern: "every", fixed_slot_id: null }],
       capacity: 35,
-      available_slot_ids: slots.slice(0, 4).map((slot) => slot.id),
+      available_slot_ids: [],
       flexibility: 3,
       kind: "theory",
       enabled: true,
@@ -106,14 +106,23 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
     const next = exists
       ? item.available_slot_ids.filter((id) => id !== slotId)
       : [...item.available_slot_ids, slotId];
-    if (next.length > 0) {
-      update(item.id, {
-        available_slot_ids: next,
-        sessions: item.sessions.map((session) =>
-          session.fixed_slot_id === slotId ? { ...session, fixed_slot_id: null } : session,
-        ),
-      });
-    }
+    update(item.id, {
+      available_slot_ids: next,
+      sessions: item.sessions.map((session) =>
+        session.fixed_slot_id === slotId ? { ...session, fixed_slot_id: null } : session,
+      ),
+    });
+  }
+
+  function setAvailableSlots(item: Offering, slotIds: string[]) {
+    update(item.id, {
+      available_slot_ids: slotIds,
+      sessions: item.sessions.map((session) =>
+        session.fixed_slot_id && !slotIds.includes(session.fixed_slot_id)
+          ? { ...session, fixed_slot_id: null }
+          : session,
+      ),
+    });
   }
 
   return (
@@ -234,11 +243,23 @@ export function OfferingEditor({ offerings, slots, onChange }: Props) {
                     <button type="button" className="danger" disabled={sameCourseCount <= 1} onClick={() => removeGroup(item)}><Trash2 size={14} /> حذف این گروه</button>
                   </div>
                   <fieldset className="slot-picker">
-                    <legend>زمان‌های آزاد استاد همین گروه</legend>
-                    {slots.map((slot) => (
-                      <button className={item.available_slot_ids.includes(slot.id) ? "active" : ""} type="button" key={slot.id} onClick={() => toggleSlot(item, slot.id)}>
-                        {item.available_slot_ids.includes(slot.id) && <Check size={11} />}{slot.label}
-                      </button>
+                    <legend>زمان‌های آزاد استاد همین گروه — از ۸ صبح تا ۶ عصر</legend>
+                    <div className="slot-actions">
+                      <button type="button" onClick={() => setAvailableSlots(item, slots.map((slot) => slot.id))}>انتخاب همه زمان‌ها</button>
+                      <button type="button" onClick={() => setAvailableSlots(item, [])}>پاک‌کردن همه</button>
+                      <span>{item.available_slot_ids.length} زمان انتخاب شده</span>
+                    </div>
+                    {[...new Set(slots.map((slot) => slot.day))].map((day) => (
+                      <div className="slot-day-group" key={day}>
+                        <strong>{day}</strong>
+                        <div>
+                          {slots.filter((slot) => slot.day === day).map((slot) => (
+                            <button className={item.available_slot_ids.includes(slot.id) ? "active" : ""} type="button" key={slot.id} onClick={() => toggleSlot(item, slot.id)}>
+                              {item.available_slot_ids.includes(slot.id) && <Check size={11} />}{slot.start} تا {slot.end}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </fieldset>
                 </div>

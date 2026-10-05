@@ -13,6 +13,7 @@ from .models import (
     Metric,
     OfferingInput,
     ScheduleAssignment,
+    ScheduleProgram,
     SessionInput,
 )
 from .repository import save_revision
@@ -30,6 +31,7 @@ def _infeasible_response(name: str, message: str) -> GenerateScheduleResponse:
         coverage_percent=0,
         demand_basis="برنامه ناممکن",
         assignments=[],
+        schedule_programs=[],
         metrics=[],
         insights=[],
         unresolved=[message],
@@ -464,12 +466,39 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
             f"دروس ترم {priority_semester} در آزادی انتخاب وزن بیشتری گرفتند."
         )
 
+    schedule_programs = [
+        ScheduleProgram(
+            id=f"semester-{semester}",
+            label=f"برنامه ترم {semester}",
+            semester=semester,
+            assignments=[
+                assignment
+                for assignment in assignments
+                if assignment.semester == semester
+            ],
+        )
+        for semester in range(1, 9)
+    ]
+    schedule_programs.append(
+        ScheduleProgram(
+            id="overall",
+            label="برنامه کامل همه ترم‌ها",
+            semester=None,
+            assignments=assignments,
+        )
+    )
+    insights.insert(
+        0,
+        "یک برنامه مادر ساخته شد و از همان برنامه، ۸ نمای ترمی و یک نمای کامل هماهنگ استخراج شد.",
+    )
+
     response_payload = {
         "name": request.name,
         "score": score,
         "coverage_percent": coverage,
         "demand_basis": demand_basis,
         "assignments": [assignment.model_dump() for assignment in assignments],
+        "schedule_programs": [program.model_dump() for program in schedule_programs],
     }
     revision_id = save_revision(request.name, score, response_payload)
     return GenerateScheduleResponse(
@@ -480,6 +509,7 @@ def solve_schedule(request: GenerateScheduleRequest) -> GenerateScheduleResponse
         coverage_percent=coverage,
         demand_basis=demand_basis,
         assignments=assignments,
+        schedule_programs=schedule_programs,
         metrics=[
             Metric(label="کیفیت چینش", value=f"{score}٪", change="براساس محدودیت و تقاضا", tone="lavender"),
             Metric(label="پوشش انتخاب", value=f"{coverage}٪", change="برآورد مسیرهای قابل اخذ", tone="mint"),

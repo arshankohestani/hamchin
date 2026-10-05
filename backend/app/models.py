@@ -38,7 +38,7 @@ class OfferingInput(BaseModel):
     week_pattern: Literal["every", "odd", "even"] = "every"
     sessions: list[SessionInput] = Field(default_factory=list, max_length=6)
     capacity: int = Field(default=35, ge=5, le=300)
-    available_slot_ids: list[str] = Field(min_length=1)
+    available_slot_ids: list[str] = Field(default_factory=list)
     flexibility: int = Field(default=3, ge=1, le=5)
     kind: Literal["theory", "lab", "skill"] = "theory"
 
@@ -98,6 +98,16 @@ class GenerateScheduleRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_references(self) -> "GenerateScheduleRequest":
+        without_availability = [
+            f"{offering.title} (گروه {offering.group_number})"
+            for offering in self.offerings
+            if not offering.available_slot_ids
+        ]
+        if without_availability:
+            raise ValueError(
+                "برای این ارائه‌ها هنوز زمان آزاد استاد انتخاب نشده است: "
+                + "، ".join(without_availability)
+            )
         slot_ids = {slot.id for slot in self.slots}
         unknown = {
             slot_id
@@ -187,6 +197,13 @@ class Metric(BaseModel):
     tone: Literal["mint", "lavender", "peach", "blue"]
 
 
+class ScheduleProgram(BaseModel):
+    id: str
+    label: str
+    semester: int | None
+    assignments: list[ScheduleAssignment]
+
+
 class GenerateScheduleResponse(BaseModel):
     revision_id: int
     name: str
@@ -195,6 +212,7 @@ class GenerateScheduleResponse(BaseModel):
     coverage_percent: int
     demand_basis: str
     assignments: list[ScheduleAssignment]
+    schedule_programs: list[ScheduleProgram]
     metrics: list[Metric]
     insights: list[str]
     unresolved: list[str]

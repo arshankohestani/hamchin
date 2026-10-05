@@ -1,19 +1,32 @@
 from .models import ConflictGroup, DemandGroup, OfferingInput, RoomInput, SessionInput, TimeSlot
 
 
+_DAYS = [
+    ("sat", "شنبه"),
+    ("sun", "یکشنبه"),
+    ("mon", "دوشنبه"),
+    ("tue", "سه‌شنبه"),
+    ("wed", "چهارشنبه"),
+    ("thu", "پنجشنبه"),
+]
+_TIMES = [
+    ("08", "08:00", "10:00", "۸", "۱۰"),
+    ("10", "10:00", "12:00", "۱۰", "۱۲"),
+    ("12", "12:00", "14:00", "۱۲", "۱۴"),
+    ("14", "14:00", "16:00", "۱۴", "۱۶"),
+    ("16", "16:00", "18:00", "۱۶", "۱۸"),
+]
+
 SLOTS = [
-    TimeSlot(id="sat-08", day="شنبه", start="08:00", end="10:00", label="شنبه، ۸ تا ۱۰"),
-    TimeSlot(id="sat-10", day="شنبه", start="10:00", end="12:00", label="شنبه، ۱۰ تا ۱۲"),
-    TimeSlot(id="sat-14", day="شنبه", start="14:00", end="16:00", label="شنبه، ۱۴ تا ۱۶"),
-    TimeSlot(id="sun-08", day="یکشنبه", start="08:00", end="10:00", label="یکشنبه، ۸ تا ۱۰"),
-    TimeSlot(id="sun-10", day="یکشنبه", start="10:00", end="12:00", label="یکشنبه، ۱۰ تا ۱۲"),
-    TimeSlot(id="sun-14", day="یکشنبه", start="14:00", end="16:00", label="یکشنبه، ۱۴ تا ۱۶"),
-    TimeSlot(id="mon-08", day="دوشنبه", start="08:00", end="10:00", label="دوشنبه، ۸ تا ۱۰"),
-    TimeSlot(id="mon-10", day="دوشنبه", start="10:00", end="12:00", label="دوشنبه، ۱۰ تا ۱۲"),
-    TimeSlot(id="mon-14", day="دوشنبه", start="14:00", end="16:00", label="دوشنبه، ۱۴ تا ۱۶"),
-    TimeSlot(id="tue-08", day="سه‌شنبه", start="08:00", end="10:00", label="سه‌شنبه، ۸ تا ۱۰"),
-    TimeSlot(id="tue-10", day="سه‌شنبه", start="10:00", end="12:00", label="سه‌شنبه، ۱۰ تا ۱۲"),
-    TimeSlot(id="tue-14", day="سه‌شنبه", start="14:00", end="16:00", label="سه‌شنبه، ۱۴ تا ۱۶"),
+    TimeSlot(
+        id=f"{day_id}-{time_id}",
+        day=day_name,
+        start=start,
+        end=end,
+        label=f"{day_name}، {start_fa} تا {end_fa}",
+    )
+    for day_id, day_name in _DAYS
+    for time_id, start, end, start_fa, end_fa in _TIMES
 ]
 
 
@@ -43,6 +56,12 @@ OFFERINGS = [
     OfferingInput(id="analysis-g1", course_id="analysis", code="CSE-121", title="تحلیل و طراحی نرم‌افزار", instructor="دکتر نادری", preferred_semester=6, group_number=1, weekly_sessions=1, capacity=38, available_slot_ids=["sat-14", "sun-10", "mon-08", "tue-14"], flexibility=4),
     OfferingInput(id="security-g1", course_id="security", code="CSE-124", title="امنیت سیستم‌های کامپیوتری", instructor="دکتر پارسا", preferred_semester=7, group_number=1, weekly_sessions=1, capacity=34, available_slot_ids=["sat-08", "sun-10", "mon-14"], flexibility=3),
 ]
+
+# در فرم اولیه هیچ ساعتی از طرف مدیرگروه فرض نمی‌شود؛ هر استاد باید صریحاً تنظیم شود.
+for _offering in OFFERINGS:
+    _offering.available_slot_ids = []
+    for _session in _offering.sessions:
+        _session.fixed_slot_id = None
 
 
 # این تعدادها برآورد نسخه نمایشی‌اند و پس از دریافت آمار آموزشی با داده واقعی جایگزین می‌شوند.

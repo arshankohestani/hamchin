@@ -18,6 +18,7 @@ import { RoomEditor } from "@/components/RoomEditor";
 import { DemandEditor } from "@/components/DemandEditor";
 import { ConflictGroupEditor } from "@/components/ConflictGroupEditor";
 import { ScheduleView } from "@/components/ScheduleView";
+import { ExcelImporter } from "@/components/ExcelImporter";
 import { approveSchedule, generateSchedule, loadDemo } from "@/lib/api";
 import type { ConflictGroup, DemandGroup, Offering, Room, ScheduleResult, Slot } from "@/lib/types";
 
@@ -28,7 +29,7 @@ export default function Home() {
   const [demandGroups, setDemandGroups] = useState<DemandGroup[]>([]);
   const [conflictGroups, setConflictGroups] = useState<ConflictGroup[]>([]);
   const [priorityIds, setPriorityIds] = useState<string[]>(["diff", "soft"]);
-  const [targetSemester, setTargetSemester] = useState<number>(7);
+  const [targetSemester, setTargetSemester] = useState<number | null>(null);
   const [instruction, setInstruction] = useState("آزادی انتخاب معادلات و مهارت‌های نرم برای دانشجویان ترم‌های بالاتر بیشتر شود.");
   const [result, setResult] = useState<ScheduleResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +43,7 @@ export default function Home() {
       .then((data) => {
         let restored: Offering[] | null = null;
         try {
-          const saved = window.localStorage.getItem("hamchin-offerings-v3");
+          const saved = window.localStorage.getItem("hamchin-offerings-v4");
           const parsed: unknown = saved ? JSON.parse(saved) : null;
           if (Array.isArray(parsed) && parsed.length > 0) restored = parsed as Offering[];
         } catch {
@@ -66,11 +67,11 @@ export default function Home() {
           setConflictGroups(data.conflict_groups);
         }
         try {
-          const savedResult = window.localStorage.getItem("hamchin-latest-schedule");
+          const savedResult = window.localStorage.getItem("hamchin-latest-schedule-v2");
           if (savedResult) setResult(JSON.parse(savedResult) as ScheduleResult);
           setApproved(window.localStorage.getItem("hamchin-approved") === "true");
         } catch {
-          window.localStorage.removeItem("hamchin-latest-schedule");
+          window.localStorage.removeItem("hamchin-latest-schedule-v2");
           window.localStorage.removeItem("hamchin-approved");
         }
       })
@@ -80,7 +81,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading && offerings.length > 0) {
-      window.localStorage.setItem("hamchin-offerings-v3", JSON.stringify(offerings));
+      window.localStorage.setItem("hamchin-offerings-v4", JSON.stringify(offerings));
     }
   }, [loading, offerings]);
 
@@ -103,6 +104,17 @@ export default function Home() {
   const totalGroups = activeOfferings.length;
   const totalMeetings = activeOfferings.reduce((sum, item) => sum + item.sessions.length, 0);
 
+  function handleExcelImport(imported: Offering[], mode: "replace" | "append") {
+    const timestamp = Date.now();
+    const next = mode === "replace"
+      ? imported
+      : [...offerings, ...imported.map((item, index) => ({ ...item, id: `${item.id}-${timestamp}-${index}` }))];
+    setOfferings(next);
+    setResult(null);
+    setApproved(false);
+    setError("");
+  }
+
   async function handleGenerate() {
     if (!activeOfferings.length) {
       setError("حداقل یک درس را برای ارائه فعال کنید.");
@@ -113,7 +125,7 @@ export default function Home() {
     setApproved(false);
     try {
       const schedule = await generateSchedule({
-        name: `پیشنهاد هوشمند ترم جاری — ${new Intl.DateTimeFormat("fa-IR").format(new Date())}`,
+        name: `برنامه هماهنگ همه ترم‌ها — ${new Intl.DateTimeFormat("fa-IR").format(new Date())}`,
         offerings: activeOfferings.map(({ enabled: _, ...item }) => item),
         slots,
         rooms,
@@ -130,7 +142,7 @@ export default function Home() {
         priority: { course_ids: priorityIds, semester: targetSemester, strength: 4, note: instruction },
       });
       setResult(schedule);
-      window.localStorage.setItem("hamchin-latest-schedule", JSON.stringify(schedule));
+      window.localStorage.setItem("hamchin-latest-schedule-v2", JSON.stringify(schedule));
       window.localStorage.setItem("hamchin-approved", "false");
       window.setTimeout(() => document.getElementById("result")?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (reason) {
@@ -203,6 +215,7 @@ export default function Home() {
           ) : (
             <div className="workspace-grid">
               <div className="editor-column">
+                <ExcelImporter slots={slots} onImport={handleExcelImport} />
                 <OfferingEditor offerings={offerings} slots={slots} onChange={setOfferings} />
                 <ConflictGroupEditor groups={conflictGroups} offerings={offerings} onChange={setConflictGroups} />
                 <RoomEditor rooms={rooms} onChange={setRooms} />
@@ -230,7 +243,8 @@ export default function Home() {
                 </div>
 
                 <label className="field-label" htmlFor="semester">پوشش ویژه دانشجویان ترم</label>
-                <select id="semester" value={targetSemester} onChange={(event) => setTargetSemester(Number(event.target.value))}>
+                <select id="semester" value={targetSemester ?? ""} onChange={(event) => setTargetSemester(event.target.value ? Number(event.target.value) : null)}>
+                  <option value="">هیچ‌کدام — پوشش همه ترم‌ها</option>
                   {[1, 2, 3, 4, 5, 6, 7, 8].map((semester) => <option value={semester} key={semester}>ترم {semester}</option>)}
                 </select>
 
@@ -245,14 +259,14 @@ export default function Home() {
 
                 <button className="generate-button" type="button" onClick={handleGenerate} disabled={generating}>
                   {generating ? <LoaderCircle className="spin" size={19} /> : <Send size={18} />}
-                  {generating ? "در حال بررسی هزاران ترکیب…" : "ساخت برنامه پیشنهادی"}
+                  {generating ? "در حال بررسی هزاران ترکیب…" : "ساخت ۹ برنامه هماهنگ"}
                 </button>
-                <button className="reset-button" type="button" onClick={() => { setPriorityIds([]); setResult(null); }}><RefreshCw size={15} /> پاک‌کردن اولویت‌ها</button>
+                <button className="reset-button" type="button" onClick={() => { setPriorityIds([]); setTargetSemester(null); setResult(null); }}><RefreshCw size={15} /> پاک‌کردن اولویت‌ها</button>
               </aside>
             </div>
           )}
 
-          {result && <div id="result"><ScheduleView result={result} approving={approving} approved={approved} onApprove={handleApprove} /></div>}
+          {result && <div id="result"><ScheduleView result={result} slots={slots} approving={approving} approved={approved} onApprove={handleApprove} /></div>}
         </div>
       </main>
     </div>

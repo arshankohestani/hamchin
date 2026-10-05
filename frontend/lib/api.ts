@@ -9,7 +9,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail ?? "ارتباط با سرور ناموفق بود.");
+    const detail = payload?.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : Array.isArray(detail)
+        ? detail.map((item) => item?.msg).filter(Boolean).join("، ")
+        : "ارتباط با سرور ناموفق بود.";
+    throw new Error(message || "ارتباط با سرور ناموفق بود.");
   }
   return response.json() as Promise<T>;
 }
