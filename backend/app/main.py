@@ -39,7 +39,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="هم‌چین API",
     description="هسته نسخه اولیه دستیار هوشمند مدیرگروه",
-    version="0.1.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
