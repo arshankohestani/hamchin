@@ -32,7 +32,7 @@ def gemini_connection_status() -> str:
         return "Gemini متصل نشد: خطای ارتباط با Google"
 
 
-def _heuristic(note: str, courses: list[CourseSummary]) -> InterpretResponse:
+def _heuristic(note: str, courses: list[CourseSummary], fallback_reason: str = "") -> InterpretResponse:
     normalized = note.replace("\u200c", " ")
     words = set(normalized.split())
     selected: list[str] = []
@@ -47,7 +47,10 @@ def _heuristic(note: str, courses: list[CourseSummary]) -> InterpretResponse:
         course_ids=selected,
         semester=semester,
         strength=4 if any(word in note for word in ("خیلی", "بیشتر", "حتماً", "ضروری")) else 3,
-        interpreted_text="درخواست با تحلیل داخلی فارسی به اولویت‌های قابل استفاده برای حل‌کننده تبدیل شد.",
+        interpreted_text=(
+            "درخواست با تحلیل داخلی فارسی به اولویت‌های قابل استفاده برای حل‌کننده تبدیل شد."
+            + (f" علت جایگزینی Gemini: {fallback_reason[:220]}" if fallback_reason else "")
+        ),
         provider="heuristic",
     )
 
@@ -104,5 +107,11 @@ def interpret_persian_request(note: str, courses: list[CourseSummary]) -> Interp
             interpreted_text=str(parsed.get("interpreted_text", "درخواست با Gemini تحلیل شد.")),
             provider="gemini",
         )
-    except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return _heuristic(note, courses)
+    except httpx.HTTPStatusError as exc:
+        try:
+            reason = str(exc.response.json().get("error", {}).get("message", f"HTTP {exc.response.status_code}"))
+        except ValueError:
+            reason = f"HTTP {exc.response.status_code}"
+        return _heuristic(note, courses, reason)
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return _heuristic(note, courses, type(exc).__name__)
