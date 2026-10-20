@@ -27,7 +27,7 @@
 ```text
 DATABASE_URL=آدرس اتصال pooled دیتابیس Neon با sslmode=require
 GEMINI_API_KEY=کلید رایگان Google AI Studio
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.5-flash-lite
 ML_TARGET_TERM=1405-1
 ```
 

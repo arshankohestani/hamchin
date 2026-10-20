@@ -83,7 +83,7 @@ Value: https://hamchin-app.vercel.app
 ```text
 DATABASE_URL=آدرس pooled connection دیتابیس Neon همراه sslmode=require
 GEMINI_API_KEY=کلید رایگان Google AI Studio
-GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_MODEL=gemini-3.5-flash-lite
 ML_TARGET_TERM=1405-1
 ```
 

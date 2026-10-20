@@ -12,11 +12,19 @@ from .models import CourseSummary, InterpretResponse
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 
 
+def _selected_model() -> str:
+    configured = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+    # Google این مدل را برای کاربران جدید بازنشسته کرده است؛ مهاجرت را خودکار انجام می‌دهیم.
+    if configured == "gemini-2.5-flash-lite":
+        return "gemini-3.5-flash-lite"
+    return configured
+
+
 def gemini_connection_status() -> str:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         return "تحلیل داخلی فعال؛ کلید Gemini تنظیم نشده"
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
+    model = _selected_model()
     try:
         response = httpx.get(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}",
@@ -60,7 +68,7 @@ def interpret_persian_request(note: str, courses: list[CourseSummary]) -> Interp
     if not api_key:
         return _heuristic(note, courses)
 
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
+    model = _selected_model()
     allowed_ids = {course.course_id for course in courses}
     course_catalog = [course.model_dump() for course in courses]
     prompt = (
