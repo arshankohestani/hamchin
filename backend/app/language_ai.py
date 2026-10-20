@@ -68,12 +68,12 @@ def interpret_persian_request(note: str, courses: list[CourseSummary]) -> Interp
         f"درخواست مدیرگروه: {note}"
     )
     schema = {
-        "type": "OBJECT",
+        "type": "object",
         "properties": {
-            "course_ids": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "semester": {"type": "INTEGER", "nullable": True},
-            "strength": {"type": "INTEGER"},
-            "interpreted_text": {"type": "STRING"},
+            "course_ids": {"type": "array", "items": {"type": "string"}},
+            "semester": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "strength": {"type": "integer", "minimum": 1, "maximum": 5},
+            "interpreted_text": {"type": "string"},
         },
         "required": ["course_ids", "semester", "strength", "interpreted_text"],
     }
@@ -85,7 +85,7 @@ def interpret_persian_request(note: str, courses: list[CourseSummary]) -> Interp
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "responseMimeType": "application/json",
-                    "responseSchema": schema,
+                    "responseJsonSchema": schema,
                     "temperature": 0.1,
                 },
             },
