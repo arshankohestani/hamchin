@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .demo_data import CONFLICT_GROUPS, DEMAND_GROUPS, OFFERINGS, ROOMS, SLOTS
-from .language_ai import interpret_persian_request
+from .language_ai import gemini_connection_status, interpret_persian_request
 from .models import (
     CourseSummary,
     DemandGroup,
@@ -70,13 +70,12 @@ def health() -> dict[str, str]:
 
 @app.get("/api/intelligence/status", response_model=IntelligenceStatus)
 def intelligence_status() -> IntelligenceStatus:
-    gemini_ready = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     target_term = os.environ.get("ML_TARGET_TERM", "1405-1")
     forecasts = get_demand_forecasts(target_term)
     preferences = get_preference("slot_scores")
     return IntelligenceStatus(
         solver="OR-Tools CP-SAT فعال",
-        persian_understanding="Gemini فعال" if gemini_ready else "تحلیل داخلی فعال؛ کلید Gemini تنظیم نشده",
+        persian_understanding=gemini_connection_status(),
         database="Neon Postgres فعال" if database_provider() == "neon-postgres" else "SQLite محلی؛ DATABASE_URL تنظیم نشده",
         demand_forecasting=f"CatBoost فعال؛ {len(forecasts)} پیش‌بینی برای {target_term}" if forecasts else "منتظر داده تاریخی و اجرای worker CatBoost",
         preference_learning=f"یادگیری فعال؛ {len(preferences)} ترجیح زمانی" if preferences else "منتظر تأیید یا امتیاز مدیرگروه",

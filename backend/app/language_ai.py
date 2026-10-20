@@ -12,6 +12,26 @@ from .models import CourseSummary, InterpretResponse
 PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 
 
+def gemini_connection_status() -> str:
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return "تحلیل داخلی فعال؛ کلید Gemini تنظیم نشده"
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
+    try:
+        response = httpx.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}",
+            params={"key": api_key},
+            timeout=12,
+        )
+        if response.is_success:
+            return f"Gemini فعال ({model})"
+        payload = response.json()
+        message = str(payload.get("error", {}).get("message", f"HTTP {response.status_code}"))
+        return f"Gemini متصل نشد: {message[:180]}"
+    except (httpx.HTTPError, ValueError):
+        return "Gemini متصل نشد: خطای ارتباط با Google"
+
+
 def _heuristic(note: str, courses: list[CourseSummary]) -> InterpretResponse:
     normalized = note.replace("\u200c", " ")
     words = set(normalized.split())
